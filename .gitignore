@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+*.pyc
+__pycache__/
+
+# Environment variables file
+.env
+
+# IDE and editor files
+.idea/
+*.iml
+
+# Virtual environment folders
+venv/
+env/
+.venv/
+
+# System files
+.DS_Store
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+tmp/
+
+# Build directories
+build/
+dist/
+
+# Docker override and temporary files
+docker-compose.override.yml
+
+# Downloaded packages folder (for offline installations)
+packages/
+
+# Converted audio files
+*.converted.wav
+
+# SQL temporary files
+*.sql~

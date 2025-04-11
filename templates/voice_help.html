@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Recognition Setup Guide</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #7c3aed;
+            --primary-hover: #6d28d9;
+            --primary-light: #ede9fe;
+            --secondary: #f5f7fb;
+            --text: #1f2937;
+            --text-light: #6b7280;
+            --white: #ffffff;
+            --error: #ef4444;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --radius-lg: 12px;
+            --spacing-lg: 16px;
+            --spacing-xl: 24px;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--text);
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: var(--secondary);
+        }
+        
+        h1 {
+            color: var(--primary);
+            margin-bottom: 24px;
+        }
+        
+        h2 {
+            margin-top: 36px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .guide-container {
+            background: var(--white);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .steps-container {
+            margin: 24px 0;
+        }
+        
+        .step {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+            align-items: flex-start;
+        }
+        
+        .step-number {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .download-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background-color: var(--primary);
+            color: white;
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin-top: 12px;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .download-button svg {
+            width: 16px;
+            height: 16px;
+        }
+        
+        .download-button:hover {
+            background-color: var(--primary-hover);
+        }
+        
+        .file-structure {
+            background-color: #f9f9f9;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid var(--primary);
+            font-family: monospace;
+            white-space: pre;
+            overflow-x: auto;
+        }
+        
+        .requirements {
+            background-color: #fffbeb;
+            border: 1px solid #fef3c7;
+            border-left: 4px solid var(--warning);
+            border-radius: 8px;
+            padding: 16px;
+            margin: 24px 0;
+        }
+        
+        .requirements h3 {
+            margin-top: 0;
+            color: #92400e;
+        }
+        
+        .requirements ul {
+            margin-bottom: 0;
+        }
+        
+        .requirements li {
+            margin-bottom: 8px;
+        }
+        
+        .success {
+            color: var(--success);
+            font-weight: 500;
+        }
+        
+        .warning {
+            color: var(--warning);
+            font-weight: 500;
+        }
+        
+        .error {
+            color: var(--error);
+            font-weight: 500;
+        }
+        
+        .navigation {
+            margin-top: 40px;
+            text-align: center;
+        }
+        
+        .nav-button {
+            background-color: var(--primary);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .nav-button:hover {
+            background-color: var(--primary-hover);
+        }
+        
+        .troubleshooting {
+            margin-top: 40px;
+        }
+        
+        .troubleshooting h3 {
+            color: var(--text);
+        }
+        
+        .troubleshooting ul li {
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="guide-container">
+        <h1>Voice Recognition Setup Guide</h1>
+        
+        <p>This guide will help you set up voice recognition for your AI Chat application. The voice recognition feature uses the Vosk model for offline speech-to-text conversion.</p>
+        
+        <h2>Installation Steps</h2>
+        
+        <div class="steps-container">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h3>Download a Voice Recognition Model</h3>
+                    <p>Visit the <a href="https://alphacephei.com/vosk/models/" target="_blank">Vosk Models website</a> and download the model for your language:</p>
+                    <div class="download-options" style="display: flex; gap: 12px; margin-top: 12px;">
+                        <a href="https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip" class="download-button" target="_blank">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            English Model (91MB)
+                        </a>
+                        <a href="https://alphacephei.com/vosk/models/vosk-model-small-fa-0.4.zip" class="download-button" target="_blank">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            Persian Model (42MB)
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h3>Extract the ZIP File</h3>
+                    <p>After downloading, extract the ZIP file to a temporary location.</p>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h3>Rename the Folder</h3>
+                    <p>Rename the extracted folder (typically named <code>vosk-model-small-en-us-0.15</code>) to simply <code>model</code>.</p>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h3>Place the Models in the Application Directory</h3>
+                    <p>For a single language: Rename the extracted folder to simply <code>model</code> and place it in the root directory.</p>
+                    <p>For multiple languages: Create a <code>models</code> folder in the root directory and place each extracted model folder inside it (keeping their original names).</p>
+                    <p>Your directory structure should look like this for multiple languages:</p>
+                    <div class="file-structure">/path/to/application/
+└── models/
+    ├── vosk-model-small-en-us-0.15/
+    │   ├── am/
+    │   ├── conf/
+    │   └── ...
+    └── vosk-model-small-fa-0.4/
+        ├── am/
+        ├── conf/
+        └── ...</div>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">5</div>
+                <div class="step-content">
+                    <h3>Restart the Application</h3>
+                    <p>Restart the application or refresh the page to activate the voice recognition feature.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="requirements">
+            <h3>System Requirements</h3>
+            <ul>
+                <li>
+                    <span class="error">❗</span> <strong>FFmpeg</strong> - REQUIRED for audio format conversion. Voice recognition will not work without it.
+                    <div class="installation-instructions">
+                        <strong>Quick Installation Instructions:</strong>
+                        <ul>
+                            <li>
+                                <strong>Using the helper script (Recommended):</strong>
+                                <pre>bash install_ffmpeg.sh</pre>
+                                <p>This script will automatically detect your OS and install FFmpeg for you.</p>
+                            </li>
+                            <li>
+                                <strong>macOS (using Homebrew):</strong>
+                                <pre>brew install ffmpeg</pre>
+                            </li>
+                            <li>
+                                <strong>Ubuntu/Debian:</strong>
+                                <pre>sudo apt update && sudo apt install ffmpeg</pre>
+                            </li>
+                            <li>
+                                <strong>Windows:</strong> Download from <a href="https://ffmpeg.org/download.html" target="_blank">ffmpeg.org</a> and add to your PATH
+                            </li>
+                        </ul>
+                        <p>After installing, restart the application or your terminal for changes to take effect.</p>
+                    </div>
+                </li>
+                <li><span class="success">✅</span> <strong>Microphone Permission</strong> - Your browser needs permission to access your microphone.</li>
+                <li><span class="warning">⚠️</span> <strong>Storage Space</strong> - The model requires approximately 100MB of storage space.</li>
+            </ul>
+        </div>
+        
+        <div class="troubleshooting">
+            <h2>Troubleshooting</h2>
+            
+            <h3>Common Issues</h3>
+            <ul>
+                <li>
+                    <strong>"FFmpeg is not installed" error:</strong> The most common cause of voice recognition failure.
+                    <ul>
+                        <li>Run our helper script: <code>bash install_ffmpeg.sh</code></li>
+                        <li>Check if FFmpeg is in your PATH by running: <code>which ffmpeg</code> (Unix/Mac) or <code>where ffmpeg</code> (Windows)</li>
+                        <li>If installed but not found, you may need to add it to your PATH or restart your terminal</li>
+                        <li>After installation, restart the application completely</li>
+                    </ul>
+                </li>
+                <li>
+                    <strong>"File does not start with RIFF id" error:</strong> This error occurs when the audio file format is not compatible. Try the following solutions:
+                    <ul>
+                        <li>Make sure FFmpeg is properly installed on your system</li>
+                        <li>Try using a different browser (Chrome works best for voice recording)</li>
+                        <li>Try speaking for at least 2-3 seconds to ensure enough audio data is captured</li>
+                        <li>Check if your microphone is working properly in other applications</li>
+                    </ul>
+                </li>
+                <li><strong>Model not found error:</strong> Verify that the model folder is named exactly <code>model</code> and is placed in the root directory.</li>
+                <li><strong>Audio conversion errors:</strong> Make sure FFmpeg is installed and available in your system path.</li>
+                <li><strong>No audio input:</strong> Check browser microphone permissions and ensure your microphone is working.</li>
+                <li><strong>Poor recognition quality:</strong> Try speaking clearly and at a moderate pace. Consider using a larger model for better accuracy.</li>
+            </ul>
+            
+            <h3>How to Verify Installation</h3>
+            <p>After completing the installation steps, you can verify that everything is set up correctly by clicking the "Check Installation" button in the voice setup modal or by using the microphone button in the chat interface.</p>
+            
+            <p>For more detailed information on VOSK, you can visit the <a href="https://alphacephei.com/vosk/install" target="_blank">official VOSK installation guide</a>.</p>
+        </div>
+        
+        <div class="multilingual-section" style="margin-top: 30px; padding: 16px; background-color: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;">
+            <h3>Using Multiple Language Models</h3>
+            <p>This application supports voice recognition in multiple languages, including Persian. To switch between languages:</p>
+            <ol>
+                <li>Click the language icon next to the microphone button</li>
+                <li>Select your desired language from the dropdown menu</li>
+                <li>Start recording your voice in the selected language</li>
+            </ol>
+            <p>Note: You must download and install the model for each language you want to use.</p>
+            
+            <h4>Available Persian Models:</h4>
+            <ul>
+                <li><strong>Small Persian Model (Recommended):</strong> <a href="https://alphacephei.com/vosk/models/vosk-model-small-fa-0.4.zip" target="_blank">vosk-model-small-fa-0.4.zip</a> (42MB)</li>
+                <li><strong>Full Persian Model:</strong> <a href="https://alphacephei.com/vosk/models/vosk-model-fa-0.5.zip" target="_blank">vosk-model-fa-0.5.zip</a> (1.5GB)</li>
+            </ul>
+            <p>The small model is recommended for most users as it provides good recognition quality while requiring less disk space and memory.</p>
+        </div>
+        
+        <div class="navigation">
+            <a href="{{ url_for('chat') }}" class="nav-button">Return to Chat</a>
+        </div>
+    </div>
+</body>
+</html>

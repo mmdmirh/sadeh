@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Assistant | Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <button class="new-chat-btn" id="new-chat-btn">
+                    <span>New chat</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="sidebar-body">
+                <div class="sidebar-section">
+                    <h3 class="sidebar-heading">Recent chats</h3>
+                    <ul class="conversation-list">
+                        {% for conv in all_conversations %}
+                        <li class="conversation-item {% if conv.id == conversation.id %}active{% endif %}" id="conv-{{ conv.id }}">
+                            <div class="conversation-link" onclick="window.location='{{ url_for("chat", conversation_id=conv.id) }}'">
+                                <svg class="conversation-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+                                </svg>
+                                <span class="conversation-title">{{ conv.title | default('New Conversation') }}</span>
+                                <div class="conversation-actions">
+                                    <button class="action-btn" onclick="event.stopPropagation(); showEditForm({{ conv.id }})">
+                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                        </svg>
+                                    </button>
+                                    <button class="action-btn" onclick="event.stopPropagation(); confirmDelete({{ conv.id }})">
+                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <form id="edit-form-{{ conv.id }}" class="edit-title-form" action="{{ url_for('rename_conversation', conversation_id=conv.id) }}" method="post">
+                                <input type="text" class="edit-title-input" name="title" value="{{ conv.title | default('New Conversation') }}" required>
+                                <button type="submit" class="edit-title-btn">Save</button>
+                            </form>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="sidebar-footer">
+                <div class="user-section">
+                    <div class="avatar">
+                        {{ current_user.username[0].upper() }}
+                    </div>
+                    <div class="user-details">
+                        <div class="username">{{ current_user.username }}</div>
+                    </div>
+                </div>
+                <div class="model-selector">
+                    <label for="model-select">AI Model</label>
+                    <select id="model-select" name="model">
+                        {% for model in models %}
+                        <option value="{{ model }}" {% if model == conversation.selected_model %}selected{% endif %}>{{ model }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Main content -->
+        <main class="main-content">
+            <div class="chat-header">
+                <div class="header-left">
+                    <button class="toggle-sidebar" id="toggle-sidebar">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
+                    </button>
+                    <h1 class="page-title">
+                        AI Assistant
+                        {% if conversation.document_mode %}
+                        <span class="document-mode-badge">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            Document Mode
+                        </span>
+                        {% endif %}
+                    </h1>
+                </div>
+                
+                <div class="header-actions">
+                    <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+                </div>
+            </div>
+            
+            {% if conversation.documents %}
+            <div class="document-list-container">
+                <div class="document-list">
+                    <div class="document-list-header">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        Uploaded Documents
+                    </div>
+                    {% for doc in conversation.documents %}
+                    <div class="document-item">
+                        <svg class="document-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                        </svg>
+                        <span class="document-name">{{ doc.filename }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="chat-body" id="chat-body">
+                <div class="messages-container">
+                    {% for msg in messages %}
+                    <div class="message {{ 'user-message' if msg.sender == 'user' else 'ai-message' }}">
+                        <div class="message-content">
+                            <div class="message-inner">
+                                <div class="message-avatar {{ 'user-avatar' if msg.sender == 'user' else 'ai-avatar' }}">
+                                    {{ msg.sender|upper|first }}
+                                </div>
+                                <div class="message-bubble">
+                                    {% if msg.sender == 'user' %}
+                                        <div class="user-content">
+                                        {% if 'VOICE_RECORDING' in msg.content %}
+                                            {% set parts = msg.content.split(':') %}
+                                            {% if parts|length >= 3 %}
+                                                {% set recording_id = parts[1] %}
+                                                {% set transcription = ':'.join(parts[2:]) %}
+                                                <div class="voice-message">
+                                                    <audio controls class="audio-player" src="{{ url_for('get_voice_recording', recording_id=recording_id) }}"></audio>
+                                                    <div class="transcription">{{ transcription }}</div>
+                                                </div>
+                                            {% else %}
+                                                {{ msg.content }}
+                                            {% endif %}
+                                        {% else %}
+                                            {{ msg.content }}
+                                        {% endif %}
+                                        </div>
+                                    {% else %}
+                                        <div class="ai-content">{{ msg.content|safe }}</div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="chat-footer">
+                <div class="input-container">
+                    <input type="hidden" id="conversation_id" value="{{ conversation.id }}">
+                    <div class="chat-input-area">
+                        <textarea id="prompt" class="chat-textarea" placeholder="Message AI..." rows="1"></textarea>
+                        <div class="input-actions">
+                            <div class="voice-controls">
+                                <button type="button" id="toggle-language-btn" class="input-btn" title="Change recognition language">
+                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"></path>
+                                    </svg>
+                                </button>
+                                <div class="language-selector" id="language-selector">
+                                    <select id="voice-language-select">
+                                        <option value="">Loading models...</option>
+                                    </select>
+                                </div>
+                                <button id="voice-record-btn" class="input-btn mic-btn" title="Record voice">
+                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+                                    </svg>
+                                </button>
+                                <span id="recording-indicator" class="recording-indicator">
+                                    Recording... <span id="recording-timer">0:00</span>
+                                </span>
+                            </div>
+                            <label for="file-upload" class="input-btn" title="Upload document">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+                                </svg>
+                                <input type="file" id="file-upload" name="file" style="display: none">
+                            </label>
+                            <button id="send-btn" class="input-btn send-btn" title="Send message">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="disclaimer">
+                    AI may produce inaccurate information about people, places, or facts.
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Voice model installation modal -->
+    <div id="voiceModelModal" class="modal" style="display: none;">
+        <!-- Modal content goes here (unchanged) -->
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // DOM Elements
+            const chatBody = document.getElementById('chat-body');
+            const promptInput = document.getElementById('prompt');
+            const sendButton = document.getElementById('send-btn');
+            const conversationId = document.getElementById('conversation_id').value;
+            const fileUpload = document.getElementById('file-upload');
+            const modelSelect = document.getElementById('model-select');
+            const newChatBtn = document.getElementById('new-chat-btn');
+            const sidebar = document.getElementById('sidebar');
+            const toggleSidebar = document.getElementById('toggle-sidebar');
+            
+            // Voice recording elements
+            const voiceRecordButton = document.getElementById('voice-record-btn');
+            const recordingIndicator = document.getElementById('recording-indicator');
+            const recordingTimer = document.getElementById('recording-timer');
+            const toggleLanguageBtn = document.getElementById('toggle-language-btn');
+            const languageSelector = document.getElementById('language-selector');
+            const voiceLanguageSelect = document.getElementById('voice-language-select');
+            
+            // Voice recording variables
+            let mediaRecorder;
+            let audioChunks = [];
+            let recordingStartTime;
+            let selectedLanguageModel = 'auto-detect';
+            let recordingInterval;
+            
+            // Toggle sidebar on mobile
+            if (toggleSidebar) {
+                toggleSidebar.addEventListener('click', function() {
+                    sidebar.classList.toggle('open');
+                });
+            }
+            
+            // Auto-scroll to bottom of messages initially
+            scrollToBottom();
+            
+            // New conversation button
+            newChatBtn.addEventListener('click', function() {
+                const selectedModel = modelSelect.value;
+                const form = document.createElement('form');
+                form.method = 'post';
+                form.action = '{{ url_for("new_conversation") }}';
+                
+                const modelInput = document.createElement('input');
+                modelInput.type = 'hidden';
+                modelInput.name = 'model';
+                modelInput.value = selectedModel;
+                form.appendChild(modelInput);
+                
+                document.body.appendChild(form);
+                form.submit();
+            });
+            
+            // Auto-expand the textarea as content grows
+            promptInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 200) + 'px'; 
+            });
+            
+            // Handle message submission
+            sendButton.addEventListener('click', sendMessage);
+            promptInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+            
+            function scrollToBottom() {
+                chatBody.scrollTop = chatBody.scrollHeight;
+            }
+            
+            // Add a simple markdown parser function
+            function parseMarkdown(text) {
+                if (!text) return '';
+                
+                // Replace headers
+                text = text.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
+                text = text.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
+                text = text.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
+                
+                // Replace bold
+                text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                
+                // Replace italic
+                text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+                
+                // Replace bullet points
+                text = text.replace(/^\* (.*?)$/gm, '<li>$1</li>');
+                text = text.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+                
+                // Replace numbered lists
+                text = text.replace(/^\d+\. (.*?)$/gm, '<li>$1</li>');
+                text = text.replace(/(<li>.*<\/li>\n?)+/g, '<ol>$&</ol>');
+                
+                // Replace code blocks
+                text = text.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+                
+                // Replace inline code
+                text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+                
+                // Replace links
+                text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+                
+                // Convert newlines to <br>
+                text = text.replace(/\n/g, '<br>');
+                
+                return text;
+            }
+            
+            function sendMessage() {
+                const prompt = promptInput.value.trim();
+                if (!prompt) return;
+                
+                // Add user message to UI immediately
+                addMessageToUI('user', prompt);
+                promptInput.value = '';
+                promptInput.style.height = 'auto'; // Reset height
+                
+                console.log("Sending request to /call_model with prompt:", prompt);
+                
+                // Send to server and handle streaming response
+                fetch('/call_model', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `conversation_id=${conversationId}&prompt=${encodeURIComponent(prompt)}`
+                })
+                .then(response => {
+                    console.log("Received response", response);
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    
+                    // Create message for AI response with thinking indicator
+                    const aiMessage = createThinkingMessage();
+                    
+                    // Process the streamed response
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder('utf-8');
+                    let responseBuffer = '';
+                    let aiContent = aiMessage.querySelector('.ai-content');
+                    let isFirstChunk = true;
+                    
+                    function readStream() {
+                        reader.read().then(({ done, value }) => {
+                            if (done) {
+                                console.log("Stream complete");
+                                // If still showing thinking indicator, replace with error message
+                                if (aiContent.querySelector('.thinking')) {
+                                    aiContent.innerHTML = "The model didn't return a response. Please try again.";
+                                }
+                                return;
+                            }
+                            
+                            const chunk = decoder.decode(value, { stream: true });
+                            responseBuffer += chunk;
+                            
+                            // Process complete SSE messages
+                            while (responseBuffer.includes('\n\n')) {
+                                const messagePart = responseBuffer.substring(0, responseBuffer.indexOf('\n\n'));
+                                responseBuffer = responseBuffer.substring(responseBuffer.indexOf('\n\n') + 2);
+                                
+                                if (messagePart.trim().startsWith('data:')) {
+                                    try {
+                                        const dataContent = messagePart.trim().substring(5).trim();
+                                        const parsedData = JSON.parse(dataContent);
+                                        
+                                        if (parsedData.text) {
+                                            // For first chunk, replace thinking indicator
+                                            if (isFirstChunk) {
+                                                aiContent.innerHTML = '';
+                                                isFirstChunk = false;
+                                            }
+                                            
+                                            aiContent.innerHTML += parsedData.text;
+                                            scrollToBottom();
+                                        } else if (parsedData.error) {
+                                            aiContent.innerHTML = "Error: " + parsedData.error;
+                                            aiContent.classList.add('error');
+                                        }
+                                    } catch (e) {
+                                        console.error("Error parsing SSE data:", e, "Raw data:", messagePart);
+                                        aiContent.innerHTML = "Error processing response. Please try again.";
+                                    }
+                                }
+                            }
+                            
+                            // Continue reading
+                            readStream();
+                        }).catch(error => {
+                            console.error('Error reading stream:', error);
+                            if (aiContent.querySelector('.thinking')) {
+                                aiContent.innerHTML = "Error: Failed to read response stream. Please try again.";
+                            }
+                        });
+                    }
+                    
+                    // Start reading the stream
+                    readStream();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    addMessageToUI('ai', 'Sorry, there was an error processing your request. Please try again.');
+                });
+            }
+            
+            function createThinkingMessage() {
+                // Create message structure
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message ai-message';
+                
+                const messageContent = document.createElement('div');
+                messageContent.className = 'message-content';
+                
+                const messageInner = document.createElement('div');
+                messageInner.className = 'message-inner';
+                
+                const messageAvatar = document.createElement('div');
+                messageAvatar.className = 'message-avatar ai-avatar';
+                messageAvatar.textContent = 'A';
+                
+                const messageBubble = document.createElement('div');
+                messageBubble.className = 'message-bubble';
+                
+                const aiContent = document.createElement('div');
+                aiContent.className = 'ai-content';
+                
+                // Add thinking indicator
+                const thinking = document.createElement('div');
+                thinking.className = 'thinking';
+                thinking.innerHTML = `
+                    <span class="thinking-dot"></span>
+                    <span class="thinking-dot"></span>
+                    <span class="thinking-dot"></span>
+                `;
+                
+                aiContent.appendChild(thinking);
+                messageBubble.appendChild(aiContent);
+                messageInner.appendChild(messageAvatar);
+                messageInner.appendChild(messageBubble);
+                messageContent.appendChild(messageInner);
+                messageDiv.appendChild(messageContent);
+                
+                // Add to messages container
+                document.querySelector('.messages-container').appendChild(messageDiv);
+                scrollToBottom();
+                
+                return messageDiv;
+            }
+            
+            function addMessageToUI(sender, content, messageId = null) {
+                // Create message structure
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${sender}-message`;
+                if (messageId) {
+                    messageDiv.id = `message-${messageId}`;
+                }
+                
+                const messageContent = document.createElement('div');
+                messageContent.className = 'message-content';
+                
+                const messageInner = document.createElement('div');
+                messageInner.className = 'message-inner';
+                
+                const messageAvatar = document.createElement('div');
+                messageAvatar.className = `message-avatar ${sender}-avatar`;
+                messageAvatar.textContent = sender === 'user' ? 'U' : 'A';
+                
+                const messageBubble = document.createElement('div');
+                messageBubble.className = 'message-bubble';
+                
+                // Handle content based on sender
+                if (sender === 'user') {
+                    const userContent = document.createElement('div');
+                    userContent.className = 'user-content';
+                    
+                    // User messages may be plain text or HTML (for voice messages)
+                    if (content.startsWith('<')) {
+                        userContent.innerHTML = content;
+                    } else {
+                        userContent.textContent = content;
+                    }
+                    
+                    messageBubble.appendChild(userContent);
+                } else {
+                    const aiContent = document.createElement('div');
+                    aiContent.className = 'ai-content';
+                    
+                    // AI messages use markdown formatting
+                    const trimmedContent = content.trim();
+                    aiContent.innerHTML = parseMarkdown(trimmedContent);
+                    
+                    messageBubble.appendChild(aiContent);
+                }
+                
+                messageInner.appendChild(messageAvatar);
+                messageInner.appendChild(messageBubble);
+                messageContent.appendChild(messageInner);
+                messageDiv.appendChild(messageContent);
+                
+                // Add to messages container
+                document.querySelector('.messages-container').appendChild(messageDiv);
+                scrollToBottom();
+                
+                return messageDiv;
+            }
+
+            // NEW FUNCTIONALITY: Voice recording
+
+            // 1. Load available voice language models
+            function loadVoiceLanguageModels() {
+                fetch('/vosk_available_models')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.models && data.models.length > 0) {
+                            // Clear existing options
+                            voiceLanguageSelect.innerHTML = '';
+                            
+                            // Add auto-detect option
+                            const autoOption = document.createElement('option');
+                            autoOption.value = 'auto-detect';
+                            autoOption.textContent = 'Auto-detect language';
+                            voiceLanguageSelect.appendChild(autoOption);
+                            
+                            // Add all available models
+                            data.models.forEach(model => {
+                                const option = document.createElement('option');
+                                option.value = model.id;
+                                option.textContent = model.name;
+                                voiceLanguageSelect.appendChild(option);
+                            });
+                            
+                            // Enable voice recording button
+                            voiceRecordButton.disabled = false;
+                        } else {
+                            // No models available - show installation instructions
+                            voiceLanguageSelect.innerHTML = '<option value="">No models found</option>';
+                            const installOption = document.createElement('option');
+                            installOption.value = "install";
+                            installOption.textContent = "Click to install models";
+                            voiceLanguageSelect.appendChild(installOption);
+                            
+                            // Disable voice recording button
+                            voiceRecordButton.disabled = true;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading voice models:', error);
+                        voiceLanguageSelect.innerHTML = '<option value="">Error loading models</option>';
+                        voiceRecordButton.disabled = true;
+                    });
+            }
+            
+            // Load models on page load
+            loadVoiceLanguageModels();
+
+            // 2. Toggle language selector
+            toggleLanguageBtn.addEventListener('click', function() {
+                languageSelector.style.display = languageSelector.style.display === 'block' ? 'none' : 'block';
+            });
+
+            // 3. Handle language selection
+            voiceLanguageSelect.addEventListener('change', function() {
+                if (this.value === 'install') {
+                    window.location.href = '/voice_help';
+                    return;
+                }
+                
+                selectedLanguageModel = this.value;
+                languageSelector.style.display = 'none';
+                
+                // Show feedback about selection
+                const modelName = this.options[this.selectedIndex].text;
+                console.log(`Selected language model: ${modelName} (${selectedLanguageModel})`);
+            });
+
+            // 4. Voice recording functionality
+            voiceRecordButton.addEventListener('click', function() {
+                if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+                    startRecording();
+                } else {
+                    stopRecording();
+                }
+            });
+
+            // Start voice recording
+            function startRecording() {
+                // Request permission to use the microphone
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        // Add recording class to control styles
+                        voiceRecordButton.parentElement.classList.add('recording');
+                        recordingIndicator.style.display = 'block';
+                        
+                        // Create media recorder
+                        mediaRecorder = new MediaRecorder(stream);
+                        audioChunks = [];
+                        
+                        // Start collecting audio data
+                        mediaRecorder.addEventListener('dataavailable', event => {
+                            audioChunks.push(event.data);
+                        });
+                        
+                        // When recording stops
+                        mediaRecorder.addEventListener('stop', () => {
+                            // Convert audio chunks to blob
+                            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                            
+                            // Create form data for API call
+                            const formData = new FormData();
+                            formData.append('voice', audioBlob);
+                            formData.append('conversation_id', conversationId);
+                            formData.append('model_id', selectedLanguageModel);
+                            
+                            // Show thinking feedback in UI
+                            const thinkingMessage = createThinkingMessage();
+                            
+                            // Send to server
+                            fetch('/upload_voice', {
+                                method: 'POST',
+                                body: formData
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                // Remove thinking message
+                                if (thinkingMessage) {
+                                    thinkingMessage.remove();
+                                }
+                                
+                                if (data.success) {
+                                    // Show both user message and AI response
+                                    // The backend will have created these messages in the database
+                                    // so on page reload they'll appear properly
+                                    console.log('Voice transcription:', data.transcription);
+                                    
+                                    // Refresh the page to show the new messages
+                                    // This is a simple approach - a more sophisticated one would
+                                    // add the messages to the UI directly
+                                    window.location.reload();
+                                } else {
+                                    // Show error
+                                    addMessageToUI('ai', `Error processing voice: ${data.error || 'Unknown error'}`);
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Error uploading voice:', error);
+                                addMessageToUI('ai', 'Sorry, there was an error processing your voice recording.');
+                            })
+                            .finally(() => {
+                                // Clean up
+                                stream.getTracks().forEach(track => track.stop());
+                                voiceRecordButton.parentElement.classList.remove('recording');
+                                recordingIndicator.style.display = 'none';
+                                clearInterval(recordingInterval); // Changed from recordingTimer to recordingInterval
+                            });
+                        });
+                        
+                        // Start recording
+                        mediaRecorder.start();
+                        recordingStartTime = Date.now();
+                        
+                        // Update timer display
+                        updateRecordingTimer();
+                        recordingInterval = setInterval(updateRecordingTimer, 1000); // Changed from recordingTimer to recordingInterval
+                    })
+                    .catch(error => {
+                        console.error('Error accessing microphone:', error);
+                        alert('Could not access microphone. Please check permissions and try again.');
+                    });
+            }
+
+            // Stop voice recording
+            function stopRecording() {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+            }
+
+            // Update recording timer display
+            function updateRecordingTimer() {
+                const elapsedSeconds = Math.floor((Date.now() - recordingStartTime) / 1000);
+                const minutes = Math.floor(elapsedSeconds / 60);
+                const seconds = elapsedSeconds % 60;
+                recordingTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+
+            // File upload handling
+            fileUpload.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    const file = this.files[0];
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('conversation_id', conversationId);
+                    
+                    fetch('/upload_document', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => {
+                        if (response.ok) {
+                            window.location.reload();
+                        } else {
+                            alert('Error uploading document');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error uploading document');
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

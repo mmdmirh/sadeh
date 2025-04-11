@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Password Reset Request</title>
+  </head>
+  <body>
+    <h1>Password Reset Request</h1>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <ul>
+          {% for message in messages %}
+            <li>{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    <form method="post" action="{{ url_for('reset_request') }}">
+      <div>
+        <label>Email:</label>
+        <input type="email" name="email" required>
+      </div>
+      <button type="submit">Send Reset Email</button>
+    </form>
+    <p><a href="{{ url_for('login') }}">Back to Login</a></p>
+  </body>
+</html>
