@@ -1,18 +1,70 @@
-version: '3.8'
 services:
   mysql:
-    image: mysql:latest
+    image: mysql:8.0
     container_name: local-mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: my-secret-pw
-      MYSQL_DATABASE: your_database_name
-      MYSQL_USER: your_user
-      MYSQL_PASSWORD: your_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-my-secret-pw}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-your_database_name}
+      MYSQL_USER: ${MYSQL_USER:-your_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-your_password}
     ports:
-      - "3306:3306"
+      - "${MYSQL_HOST_PORT:-3307}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
+  # === Ollama Service ===
+  ollama:
+    image: ollama/ollama:latest
+    container_name: local-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+      - ./ollama_entrypoint.sh:/app/ollama_entrypoint.sh
+    restart: unless-stopped
+    entrypoint: ["/app/ollama_entrypoint.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-chat-web
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./ai_models:/app/ai_models
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      FLASK_APP: ${FLASK_APP:-app.py}
+      FLASK_ENV: ${FLASK_ENV:-development}
+      SECRET_KEY: ${SECRET_KEY:-you-will-never-guess}
+      MYSQL_USER: ${MYSQL_USER:-your_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-your_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-your_database_name}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      LLM_SERVICE: ${LLM_SERVICE:-ollama}
+      DOCKER_ENV: "true"
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      DEFAULT_MODEL_NAME: ${DEFAULT_MODEL_NAME:-gemma3:1b}
 volumes:
   mysql-data:
+  ollama-models:

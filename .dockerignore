@@ -1,0 +1,16 @@
+# Exclude EVERYTHING by default
+*
+# Then explicitly include only what's needed
+!app.py
+!llm_service.py
+!speech_service.py
+!requirements.txt
+!static/css/**
+!static/js/**
+!templates/**
+# Still exclude large files/dirs even if in included directories
+**/*.bin
+**/*.gguf
+**/*.pth
+**/*.pt
+**/__pycache__/

@@ -1,136 +1,272 @@
 # AI Chat Application
 
-An AI chat application that uses Ollama to interact with various AI models and provides multilingual voice recognition capabilities.
+An AI chat application that uses Ollama or Llama.cpp to interact with various AI models and provides multilingual voice recognition (using Whisper) and text-to-speech (using Bark).
 
-## Setup and Installation
+## Running with Docker (Recommended)
 
-1. Clone the repository
-2. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Set up your environment variables in a `.env` file:
-   ```
-   SECRET_KEY=your-secret-key
-   MYSQL_USER=your-db-user
-   MYSQL_PASSWORD=your-db-password
-   MYSQL_DATABASE=your-db-name
-   MYSQL_HOST=localhost
-   MYSQL_PORT=3306
-   ```
-4. Install system dependencies:
-   - **FFmpeg**: Required for voice recognition audio processing
-     - macOS: `brew install ffmpeg`
-     - Ubuntu/Debian: `sudo apt update && sudo apt install ffmpeg`
-     - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH
-     - **Note**: Ensure FFmpeg is added to your system's PATH environment variable. You can verify the installation by running `ffmpeg -version` in your terminal or command prompt.
-   
-5. Run the application using the provided script:
-   ```
-   bash run.sh
-   ```
+This method uses Docker Compose to build the application image and run it alongside MySQL, **Ollama**, and **Llama.cpp** containers. **Default models for Ollama and Llama.cpp will be downloaded automatically if they are not found.**
 
-## Setting up Voice Recognition
+1.  **Prerequisites:**
+    *   **Docker and Docker Compose:** Install from [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine/Compose for Linux.
+    *   **Sufficient RAM:** LLM models require memory (RAM).
+        *   **Ollama:** The default model `gemma3:1b` benefits from **at least 4-5GB of RAM allocated to Docker**. Larger models like `llama2` (7B) typically need **at least 8GB**.
+        *   **Llama.cpp:** Memory needs depend on the model size (e.g., the default 7B Q4 model needs ~5-6GB).
+        *   Check your Docker Desktop settings (Settings -> Resources -> Advanced -> Memory) and increase the allocation if necessary. Insufficient memory will cause errors or slow performance.
+    *   **(Optional) NVIDIA Container Toolkit:** If you have an NVIDIA GPU and want GPU acceleration for Ollama or Llama.cpp, install the toolkit: [NVIDIA Container Toolkit Installation Guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). You may need to uncomment the `deploy` section in `docker-compose.yml`.
 
-To enable voice recognition in the application, you need to download and install Vosk speech recognition models:
+2.  **Environment Variables:**
+    *   Create a `.env` file in the project root (if it doesn't exist). You can copy the example:
+        ```bash
+        cp .env.example .env
+        ```
+    *   **Important:** Review and update the `.env` file, especially:
+        *   `SECRET_KEY` and MySQL credentials (`MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_ROOT_PASSWORD`).
+        *   `LLM_SERVICE`: Set to `ollama` (default) or `llamacpp`.
+        *   `OLLAMA_HOST`: Should typically be left as the default (`http://ollama:11434`).
+        *   `LLAMACPP_HOST`: Should typically be left as the default (`http://llamacpp`).
+        *   `LLAMACPP_MODEL`: Specifies the Llama.cpp model file. The default (`llama-2-7b-chat.Q4_K_M.gguf`) will be downloaded automatically if missing. **If you set this to a different model, you must download it manually (see step 3).**
 
-### English Language Support
+3.  **Model Downloads (Automatic for Defaults):**
+    *   **Ollama:** The `ollama` service will automatically download the default model (`gemma3:1b`) on first startup if it's not already present in the `ollama-models` volume.
+    *   **Llama.cpp (Default Model):** The `llamacpp` service will automatically download the default model specified in `.env` (e.g., `llama-2-7b-chat.Q4_K_M.gguf`) into the `./llamacpp_models_host` directory on your host machine if it's not found there on startup.
+    *   **Llama.cpp (Other Models - Manual Download Required):** If you change `LLAMACPP_MODEL` in your `.env` file to use a *different* model, the automatic download will **not** work for it. You must manually download that specific `.gguf` model file and place it in the `./llamacpp_models_host` directory before starting the containers. Create the directory if it doesn't exist:
+        ```bash
+        mkdir -p llamacpp_models_host
+        # Example manual download (replace URL and filename):
+        # curl -L <URL_to_your_model.gguf> -o ./llamacpp_models_host/<your_model_filename.gguf>
+        ```
+    *   **Whisper/Bark Models:** These models (used by the `web` service for voice features) are downloaded into the `./ai_models` directory on first use.
 
-1. Visit [Vosk Models](https://alphacephei.com/vosk/models/)
-2. Download the recommended model: [vosk-model-small-en-us-0.15](https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip) (91MB)
-3. Extract the downloaded ZIP file
-4. For single language setup:
-   - Rename the extracted folder to `model`
-   - Place the renamed folder in the root directory of the application
+4.  **Build and Run Containers:**
+    *   Open a terminal in the project root directory.
+    *   **Make entrypoint scripts executable (first time only):**
+        ```bash
+        chmod +x ollama_entrypoint.sh
+        chmod +x llamacpp_entrypoint.sh # Ensure this is executable again
+        ```
+    *   Build the application image and start the services:
+        ```bash
+        docker-compose up --build -d
+        ```
+        *   `--build`: Forces Docker to rebuild the application image.
+        *   `-d`: Runs the containers in detached mode.
+    *   **Monitor Startup:** Check the logs, especially for Ollama and Llama.cpp, to see model download progress or loading status:
+        ```bash
+        docker-compose logs -f ollama llamacpp
+        ```
+        *(Press Ctrl+C to stop viewing logs)*. The first startup might take longer while models are downloaded. Healthchecks will wait for services to become ready.
 
-### Persian Language Support
+5.  **Database Initialization:**
+    *   The first time you run `docker-compose up`, the MySQL container will initialize.
+    *   The web application container will attempt to create the necessary database tables on startup. Check logs (`docker-compose logs web`).
 
-The application supports Persian voice recognition with these steps:
+6.  **Access the Application:**
+    *   Open your web browser and navigate to: `http://localhost:5001` (or the port you configured if different).
 
-1. Create a folder named `models` in the application root directory
-2. Download the Persian model:
-   - [Small Persian Model](https://alphacephei.com/vosk/models/vosk-model-small-fa-0.4.zip) (42MB) - Recommended
-   - [Full Persian Model](https://alphacephei.com/vosk/models/vosk-model-fa-0.5.zip) (1.5GB) - Better accuracy but larger
-3. Extract the ZIP file and place the extracted folder (keep its original name) in the `models` directory
-4. Restart the application
+7.  **Model Caching:**
+    *   **Ollama Models:** Cached in the `ollama-models` Docker volume.
+    *   **Llama.cpp Models:** Located in the `./llamacpp_models_host` directory on your host machine (mounted into the `llamacpp` container).
+    *   **Whisper/Bark Models:** Cached inside the `ai_models` directory within the project folder (mounted into the `web` container).
 
-### Multiple Language Support
+8.  **Stopping the Application:**
+    *   To stop the running containers:
+        ```bash
+        docker-compose down
+        ```
+    *   To stop and remove the volumes (including database data and Ollama models cache, but **NOT** your local Llama.cpp models in `./llamacpp_models_host` or Whisper/Bark models in `./ai_models`):
+        ```bash
+        docker-compose down -v
+        ```
 
-For multilingual support:
+## Running Locally (Without Docker)
 
-1. Create a `models` directory in the application root
-2. Download and extract model files for your desired languages
-3. Place each model folder (with original names) in the `models` directory
-4. Restart the application
-5. Use the language selector button next to the microphone icon to switch languages
+This method runs the application directly on your host machine, requiring manual setup of Python, dependencies, MySQL, **and Ollama**.
 
-Your directory structure should look like this for multiple languages:
+1.  **Prerequisites:**
+    *   **Python 3.9+**
+    *   **FFmpeg**: Required for audio processing.
+        *   macOS: `brew install ffmpeg`
+        *   Ubuntu/Debian: `sudo apt update && sudo apt install ffmpeg portaudio19-dev`
+        *   Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH.
+    *   **PortAudio** (for PyAudio):
+        *   macOS: `brew install portaudio` (Handled by `run.sh`)
+        *   Ubuntu/Debian: `sudo apt install portaudio19-dev` (Handled by `run.sh`)
+    *   **(Optional) CUDA Toolkit**: For GPU acceleration.
+    *   **Sufficient RAM:** Ensure your host machine has enough free RAM for the Ollama models you intend to run (e.g., 4-5GB+ for `gemma3:1b`, 8GB+ for `llama2`).
+    *   **Ollama:** Install Ollama on your **host machine** by following instructions at [ollama.ai](https://ollama.ai/). Ensure the Ollama service is running (`ollama serve` in a separate terminal if needed) and pull the default model:
+        ```bash
+        ollama pull gemma3:1b
+        ```
+
+2.  **Set up Python Virtual Environment:**
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    ```
+3.  **Install Python Dependencies:**
+    The `run.sh` script handles this automatically. If running manually:
+    ```bash
+    pip install --upgrade pip
+    pip install -r requirements.txt
+    # PyAudio might need special flags on macOS, handled by run.sh
+    ```
+4.  **Set up Environment Variables:** Create a `.env` file in the project root:
+    ```dotenv
+    FLASK_APP=app.py
+    FLASK_ENV=development
+    SECRET_KEY=your-very-secret-key # Change this!
+    MYSQL_USER=your_db_user
+    MYSQL_PASSWORD=your_db_password
+    MYSQL_DATABASE=your_db_name
+    MYSQL_HOST=localhost # Or your DB host
+    MYSQL_PORT=3306
+    # === Point OLLAMA_HOST to your local Ollama service ===
+    OLLAMA_HOST=http://localhost:11434
+
+    # Optional: Email settings for password reset
+    MAIL_SERVER=smtp.example.com
+    MAIL_PORT=587
+    MAIL_USE_TLS=true
+    MAIL_USERNAME=your-email@example.com
+    MAIL_PASSWORD=your-email-password
+    MAIL_DEFAULT_SENDER=your-email@example.com
+    ```
+5.  **Run the Application:**
+    ```bash
+    bash run.sh
+    ```
+    This script handles setup and starts the Flask application.
+
+## Voice Features (Whisper & Bark)
+
+*   **Speech Recognition (Whisper):** Uses `faster-whisper`. Models (`base`, `small`, etc.) are downloaded automatically on first use. Supports multiple languages including English and Persian. Language can be selected in the UI or set to auto-detect.
+*   **Text-to-Speech (Bark):** Uses `suno/bark-small`. Models are downloaded automatically. Provides high-quality speech synthesis in multiple languages based on the detected or selected language.
 
 ## Offline Server Installation Guide
 
-This guide explains how to install and run the AI Chat Application on a server without internet access.
+This guide explains how to install and run the AI Chat Application on a server without internet access, **using Docker**.
 
-### 1. Prerequisites
-- **Python:** Ensure Python 3.9+ is installed.
-- **MySQL:** Install and configure MySQL Server offline.
-- **FFmpeg:** Download the appropriate offline installer:
-  - **Ubuntu/Debian:** Obtain FFmpeg deb packages from an offline source.
-  - **macOS:** Pre-download the FFmpeg binary or installer.
-  - **Windows:** Download the FFmpeg ZIP from [ffmpeg.org](https://ffmpeg.org/download.html) and add the `bin` folder to PATH.
-- **Python Packages:** On a machine with internet, run:
-  ```
-  pip download -r requirements.txt -d packages
-  ```
-  Then transfer the downloaded packages to your offline server.
+### 1. Prepare Docker Images and Models (Online Machine)
+*   **Application Image:** Build the application image:
+    ```bash
+    docker-compose build web
+    ```
+    Save the image to a tar file:
+    ```bash
+    docker save pythonproject6-web:latest > ai-chat-web.tar
+    # Verify image name with 'docker images' if needed
+    ```
+*   **MySQL Image:** Pull the MySQL image:
+    ```bash
+    docker pull mysql:8.0
+    ```
+    Save the image:
+    ```bash
+    docker save mysql:8.0 > mysql-8.0.tar
+    ```
+*   **Ollama Image:** Pull the Ollama image:
+    ```bash
+    docker pull ollama/ollama:latest
+    ```
+    Save the image:
+    ```bash
+    docker save ollama/ollama:latest > ollama-latest.tar
+    ```
+*   **Ollama Models:**
+    *   Run `docker-compose up -d ollama` on the online machine. This will trigger the `ollama_entrypoint.sh` to download the default model (`gemma3:1b`) into the `ollama-models` volume if needed.
+    *   Pull any *additional* models you require: `docker-compose exec ollama ollama pull <other_model_name>`
+    *   Stop the container: `docker-compose down`
+    *   Copy the models from the Docker volume. Find the volume path: `docker volume inspect pythonproject6_ollama-models` (look for `Mountpoint`).
+    *   Copy the contents of the mountpoint to `offline_ollama_models/`.
+    *   Remove the volume if desired: `docker volume rm pythonproject6_ollama-models`
+*   **Llama.cpp Models:**
+    *   Run `docker-compose up -d llamacpp` on the online machine. This will trigger the `llamacpp_entrypoint.sh` to download the default model (`llama-2-7b-chat.Q4_K_M.gguf`) into the `./llamacpp_models_host` directory if needed.
+    *   If you need *other* Llama.cpp models, download them manually into `./llamacpp_models_host`.
+    *   Stop the container: `docker-compose down`
+    *   Copy the contents of the `./llamacpp_models_host` directory to `offline_llamacpp_models/`.
+*   **Whisper/Bark Models:**
+    *   Run the full application via Docker (`docker-compose up -d web`) once and use the voice features to trigger the download of Whisper/Bark models into the `./ai_models` directory.
+    *   Stop the containers: `docker-compose down`
+    *   Copy the contents of the `./ai_models` directory to `offline_ai_models/`.
+*   **Python Packages:** (Optional, if not relying solely on the Docker image build)
+    ```bash
+    # Create and activate venv first
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install --upgrade pip
+    pip download -r requirements.txt -d packages/
+    ```
 
-### 2. Application Setup
-- **Transfer Files:** Clone or copy the repository files to your offline server.
-- **Install Dependencies:** Use the pre-downloaded packages:
-  ```
-  pip install --no-index --find-links=/path/to/packages -r requirements.txt
-  ```
-- **Environment Variables:** Create a `.env` file in the project root with at least:
-  ```
-  FLASK_APP=app.py
-  FLASK_ENV=development
-  SECRET_KEY=your-secret-key
-  MYSQL_USER=your_db_user
-  MYSQL_PASSWORD=your_db_password
-  MYSQL_DATABASE=your_db_name
-  MYSQL_HOST=localhost
-  MYSQL_PORT=3306
-  ```
+### 2. Transfer Files to Offline Server
+*   Copy the following to the offline server:
+    *   The entire project directory (including `docker-compose.yml`, `.env.example`, `Dockerfile`, etc.)
+    *   The saved Docker image tar files (`ai-chat-web.tar`, `mysql-8.0.tar`, `ollama-latest.tar`)
+    *   The copied Ollama models directory (`offline_ollama_models/`)
+    *   The copied Whisper/Bark models directory (`offline_ai_models/`)
+    *   The copied Llama.cpp models directory (`offline_llamacpp_models/`)
+    *   (Optional) The downloaded Python packages (`packages/` directory and `requirements.txt`)
 
-### 3. Database Setup
-- **Create Database:** Manually create the database using your MySQL client.
-- **Seed Data:** Execute the SQL seeder with:
-  ```
-  mysql -u your_db_user -p your_db_name < seeder.sql
-  ```
+### 3. Setup on Offline Server
+*   **Install Docker & Docker Compose:** Install using offline packages suitable for the OS.
+*   **Load Docker Images:**
+    ```bash
+    docker load < ai-chat-web.tar
+    docker load < mysql-8.0.tar
+    docker load < ollama-latest.tar
+    # Load Llama.cpp server image if needed
+    # docker load < llamacpp-server.tar 
+    ```
+*   **Prepare Volumes/Directories:**
+    *   Create directories for the model volumes/mounts on the host:
+        ```bash
+        mkdir -p /opt/ai-chat/ollama-models
+        mkdir -p /opt/ai-chat/ai_models
+        mkdir -p /opt/ai-chat/llamacpp_models_host # For Llama.cpp models
+        ```
+    *   Copy the pre-downloaded models into these directories:
+        ```bash
+        cp -r /path/to/offline_ollama_models/* /opt/ai-chat/ollama-models/
+        cp -r /path/to/offline_ai_models/* /opt/ai-chat/ai_models/
+        cp -r /path/to/offline_llamacpp_models/* /opt/ai-chat/llamacpp_models_host/ # Copy Llama.cpp models
+        ```
+    *   Ensure correct permissions if necessary (Docker user needs read/write).
+*   **Modify `docker-compose.yml` (Offline Version):**
+    *   Change the volume mounts to use the host paths you created:
+        ```yaml
+        services:
+          ollama:
+            # ...
+            volumes:
+              - /opt/ai-chat/ollama-models:/root/.ollama # Mount host path
+          llamacpp:
+            # ...
+            volumes:
+              - /opt/ai-chat/llamacpp_models_host:/models # Mount host path for Llama.cpp
+          web:
+            # ...
+            volumes:
+              - /opt/ai-chat/ai_models:/app/ai_models # Mount host path
+        # Remove named volume definitions at the bottom, except mysql-data
+        # volumes:
+        #   mysql-data: 
+        #   ollama-models: # Remove this
+        ```
+*   **Configure `.env`:** Create a `.env` file from `.env.example`. Set secrets/passwords. Ensure `LLM_SERVICE`, `OLLAMA_HOST`, `LLAMACPP_HOST`, and `LLAMACPP_MODEL` are correct for the offline setup.
 
-### 4. Vosk Voice Recognition Models
-- **Download Models:** Prior to going offline, download the required Vosk models.
-  - **English:** For example, download [vosk-model-small-en-us-0.15.zip].  
-    • For single language mode, extract and rename the folder to `model` in the project root.  
-    • For multilingual mode, create a `models` directory and place the extracted folder there.
-  - **Other Languages (e.g. Persian):** Download [vosk-model-small-fa-0.4.zip] or [vosk-model-fa-0.5.zip] and extract them into the `models` directory.
-  
-### 5. AI Model Availability
-- **Ollama Dependency:** The application uses Ollama to call AI models. If Ollama normally reaches out online, ensure that the necessary model files are already available or use a pre-configured offline model.
+### 4. Run the Application (Offline Server)
+*   Navigate to the project directory on the offline server.
+*   Start the services:
+    ```bash
+    docker-compose up -d
+    ```
+    *   *(No `--build` needed as images are pre-loaded)*
 
-### 6. Running the Application
-- **Start Services:** Ensure MySQL is running.
-- **Launch:** Run the provided script:
-  ```
-  bash run.sh
-  ```
-  This script initializes dependencies, (optionally) starts the MySQL container, seeds the database, and launches the Flask application.
+### 5. Access
+*   Open a web browser on a machine within the offline network and navigate to the server’s IP address and port (default 5001).
 
-### 7. Access
-- Open your web browser on a machine within your offline network and navigate to the server’s address (default port is 5000).
-
-### 8. Troubleshooting
-- **FFmpeg:** Verify FFmpeg installation with `ffmpeg -version`.
-- **Vosk Models:** Ensure the default model is in the `model` folder (or additional models in `models`) with required files (e.g. `am/final.mdl` and `conf` folder).
-- **MySQL Connection:** Confirm credentials in the `.env` file match your MySQL setup.
+### 6. Troubleshooting (Offline)
+*   **Docker:** Verify images loaded (`docker images`) and containers are running (`docker-compose ps`). Check logs (`docker-compose logs ollama`, `docker-compose logs web`).
+*   **Model Volumes:** Double-check mount paths in `docker-compose.yml` and permissions on the host directories (`/opt/ai-chat/...`).
+*   **Ollama Container:** Check if models are listed inside the container: `docker-compose exec ollama ollama list`.
+*   **Network:** Ensure containers can communicate (Docker handles this by default on the `default` network).
 

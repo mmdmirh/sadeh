@@ -4,7 +4,8 @@ CREATE TABLE IF NOT EXISTS user (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(64) NOT NULL UNIQUE,
     email VARCHAR(120) NOT NULL UNIQUE,
-    password_hash VARCHAR(128),
+    -- Increase length from 256 to 512
+    password_hash VARCHAR(512),
     confirmed TINYINT(1) DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
