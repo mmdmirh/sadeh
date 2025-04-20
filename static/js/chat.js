@@ -68,9 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
     aiTimer = setInterval(()=>{
       if(aiQueue.length>0 && aiBubble) {
         aiBubble.textContent += aiQueue.shift(); scrollToBottom();
-      } else if(aiDone && aiQueue.length===0) {
+      } else if(aiDone && aiQueue.length===0 && aiBubble) {
         clearInterval(aiTimer); aiTimer=null;
         aiBubble.innerHTML = renderMarkdown(aiBubble.textContent);
+        finalize();
       }
     },30);
   }
@@ -112,12 +113,18 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(res=>{if(!res.ok) throw Error(res.status); return res.body.getReader();})
       .then(reader=>{
         const dec=new TextDecoder(); function read({done,value}){
-          if(done) { aiDone=true; animateAI(); finalize(); return; }
-          const chunk=dec.decode(value,true);
+          if(done) { aiDone=true; animateAI(); return; }
+          const chunk=dec.decode(value, { stream: true });
           chunk.split('\n').forEach(line=>{
             if(line.startsWith('data: ')){
-              try{const d=JSON.parse(line.slice(6)); if(d.text) for(const c of d.text) aiQueue.push(c);}catch{} }
-          }); animateAI(); reader.read().then(read);
+              try{
+                const d = JSON.parse(line.slice(6));
+                if(d.text) aiQueue.push(d.text);
+              } catch {}
+            }
+          });
+          animateAI();
+          reader.read().then(read);
         }
         reader.read().then(read);
       })
