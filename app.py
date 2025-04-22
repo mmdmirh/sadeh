@@ -165,12 +165,23 @@ def load_user(user_id):
 def index():
     return render_template('index.html')
 
+@app.route('/ping')
+def ping():
+    return 'pong'
+
 # ===========================
 # Ollama model listing at startup
 # ===========================
 def load_llm_models():
     """Load models from the configured LLM service"""
     try:
+        # Read comma-separated models list from LLM_MODELS env var first
+        models_env = os.environ.get('LLM_MODELS')
+        if models_env:
+            models_list = [m.strip() for m in models_env.split(',') if m.strip()]
+            logger.info(f"Using models from LLM_MODELS env: {models_list}")
+            return models_list
+        
         logger.info(f"Attempting to list models from {llm_service_type} service")
         models = llm_service.list_models()
         
@@ -1415,6 +1426,8 @@ def test_ollama():
     return jsonify(results)
 
 # Main entry point
+
+    import os
 if __name__ == '__main__':
     # Check dependencies
     system_deps = check_system_dependencies()
@@ -1437,4 +1450,7 @@ if __name__ == '__main__':
     # === Update app.run for Docker ===
     # Use host='0.0.0.0' to be accessible outside the container
     # Use port=5001 as exposed in Dockerfile/docker-compose.yml
-    app.run(debug=True, host='0.0.0.0', port=5001)
+
+print(">> Current working directory:", os.getcwd())
+print(">> Template folder path:", app.template_folder)
+app.run(debug=True, host='0.0.0.0', port=5001)
