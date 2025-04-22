@@ -1013,9 +1013,53 @@ def call_model():
                         db.session.add(ai_message)
                         db.session.commit()
                         logger.info(f"Saved AI message with ID {ai_message.id}")
+                        ai_message_id = ai_message.id
                     except Exception as e:
                         logger.error(f"Failed to save AI message to DB: {e}")
                         db.session.rollback()
+                # Extract conversation topic after saving AI message
+                try:
+                    topic_prompt = "Please provide a concise conversation topic (single word or phrase, max 6 characters) for the conversation above."
+                    # Build topic messages with full conversation context and AI response
+                    topic_messages = messages_history + [
+                        {"role": "assistant", "content": full_response},
+                        {"role": "user", "content": topic_prompt}
+                    ]
+                    topic_response = llm_service.chat(model_name, topic_messages, stream=False)
+                    logger.info(f"Topic extraction raw response: {topic_response}")
+                    # Robustly extract topic
+                    topic = None
+                    resp = topic_response
+                    if isinstance(resp, dict):
+                        # Try OpenAI-style choices
+                        if 'choices' in resp and isinstance(resp.get('choices'), list) and resp['choices']:
+                            choice = resp['choices'][0]
+                            msg_obj = choice.get('message') or choice
+                            if isinstance(msg_obj, dict):
+                                topic = msg_obj.get('content') or msg_obj.get('text')
+                        # Fallback to top-level message
+                        elif 'message' in resp and isinstance(resp['message'], dict):
+                            topic = resp['message'].get('content') or resp['message'].get('text')
+                        # Fallback to text
+                        elif 'text' in resp:
+                            topic = resp.get('text')
+                    elif isinstance(resp, str):
+                        topic = resp
+                    # Normalize topic
+                    topic = (topic or "").strip().strip('"').strip()
+                    # Update DB title if found
+                    if topic:
+                        conv = db.session.get(Conversation, conversation_id)
+                        conv.title = topic
+                        db.session.commit()
+                    else:
+                        logger.warning("Topic extraction returned empty topic")
+                    logger.info(f"Emitting topic SSE: {topic} for conversation {conversation_id}")
+                    # Always emit a topic SSE event
+                    yield f"data: {json.dumps({'topic': topic})}\n\n"
+                except Exception as e:
+                    logger.error(f"Error extracting topic: {e}")
+                    yield f"data: {json.dumps({'topic': ''})}\n\n"
             except Exception as e:
                 logger.exception(f"Exception in streaming loop: {e}")
                 error_text = json.dumps({"error": str(e), "text": f"⚠️ {str(e)}"})
@@ -1426,8 +1470,6 @@ def test_ollama():
     return jsonify(results)
 
 # Main entry point
-
-    import os
 if __name__ == '__main__':
     # Check dependencies
     system_deps = check_system_dependencies()
@@ -1451,6 +1493,5 @@ if __name__ == '__main__':
     # Use host='0.0.0.0' to be accessible outside the container
     # Use port=5001 as exposed in Dockerfile/docker-compose.yml
 
-print(">> Current working directory:", os.getcwd())
-print(">> Template folder path:", app.template_folder)
+
 app.run(debug=True, host='0.0.0.0', port=5001)

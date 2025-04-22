@@ -96,6 +96,14 @@ document.addEventListener('DOMContentLoaded', () => {
     div.innerHTML = inner; container.appendChild(div); scrollToBottom();
   }
 
+  // Update conversation title in sidebar and header when AI sends topic
+  function updateTopicUI(topic) {
+    const convSpan = document.querySelector('.conversation-nav li.active a span');
+    if (convSpan) convSpan.textContent = topic;
+    const headerSpan = document.getElementById('conversation-title');
+    if (headerSpan) headerSpan.textContent = topic;
+  }
+
   // Send
   function sendMessage() {
     if(isAiResponding) return;
@@ -115,12 +123,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const dec=new TextDecoder(); function read({done,value}){
           if(done) { aiDone=true; animateAI(); return; }
           const chunk=dec.decode(value, { stream: true });
+          console.log('SSE chunk:', chunk);
           chunk.split('\n').forEach(line=>{
+            console.log('SSE line:', line);
             if(line.startsWith('data: ')){
               try{
                 const d = JSON.parse(line.slice(6));
-                if(d.text) aiQueue.push(d.text);
-              } catch {}
+                console.log('SSE parsed data:', d);
+                if (d.topic !== undefined) {
+                  console.log('Updating topic to:', d.topic);
+                  updateTopicUI(d.topic);
+                } else if (d.text) {
+                  aiQueue.push(d.text);
+                }
+              } catch(e){
+                console.error('Failed to parse SSE line JSON', e);
+              }
             }
           });
           animateAI();
