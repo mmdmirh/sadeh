@@ -42,12 +42,6 @@
           <div class="name">{{ current_user.username }}</div>
         </div>
         <div class="selectors">
-          <label>Service
-            <select name="llm_service" id="llm-service-select">
-              <option value="ollama" {% if llm_service_type=='ollama' %}selected{% endif %}>Ollama</option>
-              <option value="llamacpp" {% if llm_service_type=='llamacpp' %}selected{% endif %}>Llama.cpp</option>
-            </select>
-          </label>
           <label>Model
             <select name="model" id="model-select">
               {% for model in models %}
