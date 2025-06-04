@@ -22,8 +22,7 @@ from ollama import RequestError, ResponseError
 # Import our new LLM service abstraction
 from llm_service import LLMServiceFactory
 
-# Import the speech service we created
-from speech_service import speech_service
+# Speech service functionality has been removed
 
 # Load environment variables from .env file
 load_dotenv()
@@ -172,147 +171,93 @@ def ping():
 # ===========================
 # Ollama model listing at startup
 # ===========================
-def load_llm_models():
-    """Load models from the configured LLM service"""
-    try:
-        # Read comma-separated models list from LLM_MODELS env var first
-        models_env = os.environ.get('LLM_MODELS')
-        if models_env:
-            models_list = [m.strip() for m in models_env.split(',') if m.strip()]
-            logger.info(f"Using models from LLM_MODELS env: {models_list}")
-            return models_list
-        
-        logger.info(f"Attempting to list models from {llm_service_type} service")
-        models = llm_service.list_models()
-        
-        if not models:
-            logger.warning(f"No models found. Will use default model: {DEFAULT_MODEL_NAME}")
-            models.append(DEFAULT_MODEL_NAME)
-        else:
-            logger.info(f"Successfully loaded models from {llm_service_type} service: {models}")
-        return models
-    except Exception as e:
-        logger.exception(f"Error loading {llm_service_type} models: {e}")
-        return [DEFAULT_MODEL_NAME]
+def load_and_ensure_llm_models():
+    """Loads model list, ensures default (and specified) models are pulled if missing."""
+    desired_models_from_env = []
+    models_env_str = os.environ.get('LLM_MODELS')
+    if models_env_str:
+        desired_models_from_env = [m.strip() for m in models_env_str.split(',') if m.strip()]
+        logger.info(f"Models specified in LLM_MODELS env: {desired_models_from_env}")
 
-llm_models = load_llm_models()
-# Ensure there's at least a default model name in the config, even if loading failed
-app.config['LLM_MODELS'] = llm_models if llm_models else [DEFAULT_MODEL_NAME]
+    models_to_ensure = set(desired_models_from_env)
+    if DEFAULT_MODEL_NAME:
+        models_to_ensure.add(DEFAULT_MODEL_NAME)
+    
+    if not models_to_ensure:
+        logger.warning("No LLM_MODELS in env and no DEFAULT_MODEL_NAME set. Cannot ensure any models.")
+        # Attempt to list whatever is there, or return empty if service fails
+        try:
+            return llm_service.list_models()
+        except Exception as e:
+            logger.exception(f"Error listing models when no specific models were targeted: {e}")
+            return []
+
+    logger.info(f"Models to ensure are available: {list(models_to_ensure)}")
+
+    try:
+        available_models_before_pull = llm_service.list_models()
+        logger.info(f"Models available before pull attempt: {available_models_before_pull}")
+
+        for model_name in models_to_ensure:
+            # Check if model or any variant (e.g., model_name:latest) is present
+            is_present = any(m.startswith(model_name) for m in available_models_before_pull)
+            if not is_present:
+                logger.info(f"Model '{model_name}' not found locally. Attempting to pull...")
+                pull_success = llm_service.pull_model(model_name, retries=2, initial_delay=10)
+                if pull_success:
+                    logger.info(f"Successfully pulled '{model_name}'.")
+                else:
+                    logger.error(f"Failed to pull '{model_name}'. It might not be available for use.")
+            else:
+                logger.info(f"Model '{model_name}' or a variant is already available.")
+
+        final_available_models = llm_service.list_models()
+        logger.info(f"Models available after pull attempts: {final_available_models}")
+        
+        if not final_available_models and DEFAULT_MODEL_NAME: # If list is empty, but we have a default
+            logger.warning(f"No models seem to be available even after pull attempts. UI will show default: {DEFAULT_MODEL_NAME}")
+            return [DEFAULT_MODEL_NAME] 
+        return final_available_models
+
+    except Exception as e:
+        logger.exception(f"Error during model loading and pulling process: {e}")
+        if DEFAULT_MODEL_NAME:
+            logger.warning(f"Proceeding with fallback default model name for UI due to error: {DEFAULT_MODEL_NAME}")
+            return [DEFAULT_MODEL_NAME]
+        return [] # Fallback to empty list if no default model name
+
+llm_models = load_and_ensure_llm_models()
+app.config['LLM_MODELS'] = llm_models if llm_models else ([DEFAULT_MODEL_NAME] if DEFAULT_MODEL_NAME else [])
 logger.info(f"Using models for dropdown: {app.config['LLM_MODELS']}")
 
 # ===========================
-# Voice Processing functions using faster-whisper & Bark (via speech_service)
+# Audio Processing Placeholders (functionality removed)
 # ===========================
+
 def check_whisper_model_exists(model_name="base"):
-    """Check if the specified faster-whisper model can be loaded via speech_service"""
-    try:
-        speech_service.load_whisper_model(model_name)
-        logger.info(f"Whisper model '{model_name}' is available via speech_service")
-        return True
-    except Exception as e:
-        logger.exception(f"Error checking Whisper model via speech_service: {e}")
-        return False
+    """Placeholder function - Whisper functionality has been removed"""
+    logger.warning("Whisper functionality has been removed from this version")
+    return False
 
 def check_ffmpeg_installed():
-    """Check if FFmpeg is installed and available in the system path"""
-    try:
-        # Keep using subprocess for ffmpeg check
-        subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        logger.info("FFmpeg is installed and available")
-        return True
-    except FileNotFoundError:
-        logger.warning("FFmpeg is not installed or not in system PATH")
-        return False
-    except subprocess.CalledProcessError:
-        # Handles cases where ffmpeg exists but returns non-zero exit code on -version
-        logger.info("FFmpeg is installed (returned non-zero on -version, but likely ok)")
-        return True
-    except Exception as e:
-        logger.error(f"Error checking FFmpeg: {e}")
-        return False
+    """Placeholder function - FFmpeg check"""
+    logger.warning("FFmpeg check - audio processing functionality has been removed")
+    return False
 
 def recognize_audio(file_path, language=None):
-    """Recognize audio using speech_service"""
-    try:
-        # Verify the file exists and is readable
-        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-            logger.error(f"Audio file does not exist or is empty: {file_path}")
-            return {"text": "Error: Audio file is missing or empty", "language": "en"}
-
-        logger.info(f"Processing audio file: {file_path}, Size: {os.path.getsize(file_path)} bytes")
-        # Clarify that 'language' here is the code passed to the service
-        logger.info(f"Using language code hint for transcription: {language}")
-
-        # Read the audio file into memory
-        with open(file_path, 'rb') as f:
-            audio_data = f.read()
-
-        # Transcribe using speech_service
-        result = speech_service.transcribe_audio(audio_data, language=language)
-
-        # Return the result dictionary
-        return result
-
-    except Exception as e:
-        logger.exception(f"Voice recognition failed: {e}")
-        return {"text": f"Error processing voice: {str(e)}", "language": "en"}
+    """Placeholder function - Audio recognition has been removed"""
+    logger.warning("Audio recognition functionality has been removed")
+    return "Audio recognition is not available in this version"
 
 def convert_audio_format(input_path):
-    """Convert audio to the format required by Whisper: WAV, 16kHz, 16-bit, mono"""
-    try:
-        # First check if ffmpeg is available
-        if not check_ffmpeg_installed():
-            logger.error("FFmpeg is not installed. Cannot convert audio format.")
-            return None
-        
-        output_path = input_path + ".converted.wav"
-        logger.info(f"Converting audio file {input_path} to format required by Whisper")
-        
-        # Use ffmpeg with more explicit parameters to ensure proper WAV format
-        subprocess.run([
-            "ffmpeg", "-y", "-i", input_path,  # -y to overwrite output file
-            "-acodec", "pcm_s16le",  # 16-bit PCM
-            "-ar", "16000",          # 16kHz sample rate
-            "-ac", "1",              # mono channel
-            "-f", "wav",             # force WAV format
-            output_path
-        ], check=True, stderr=subprocess.PIPE)
-        
-        # Verify the converted file exists and has content
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            logger.error("Converted file is empty or does not exist")
-            return None
-        
-        logger.info(f"Successfully converted audio to {output_path}")
-        return output_path
-    except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg conversion failed: {e.stderr.decode() if e.stderr else str(e)}")
-        return None
-    except Exception as e:
-        logger.exception(f"Audio conversion failed: {str(e)}")
-        return None
+    """Placeholder function - Audio conversion has been removed"""
+    logger.warning("Audio conversion functionality has been removed")
+    return None
 
 def detect_language(audio_file_path):
-    """Detects language from audio using faster-whisper via speech_service.
-    Returns the detected language code (e.g., 'en', 'fa').
-    """
-    logger.info("Detecting language from audio sample...")
-    try:
-        # Read audio file
-        with open(audio_file_path, 'rb') as f:
-            audio_data = f.read()
-
-        # Use speech service to transcribe without specifying a language
-        result = speech_service.transcribe_audio(audio_data)
-
-        # Return the detected language code
-        detected_language = result.get("language", "en")
-        logger.info(f"Detected language code: {detected_language}")
-        return detected_language
-
-    except Exception as e:
-        logger.exception(f"Language detection failed: {e}")
-        return "en"  # Default to English on error
+    """Placeholder function - Language detection has been removed"""
+    logger.warning("Language detection functionality has been removed")
+    return 'en'  # Default to English
 
 # ===========================
 # Routes for Authentication

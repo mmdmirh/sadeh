@@ -11,25 +11,16 @@ pymysql>=1.0.0
 # Environment variables
 python-dotenv>=0.20.0
 
-# Voice recognition and text-to-speech (updated with stable versions)
-# Using faster-whisper instead of openai-whisper for better compatibility
-faster-whisper>=0.9.0
-# Or alternatively, pin to a specific stable version of openai-whisper
-# openai-whisper==20231117
-transformers>=4.31.0 # Bark requirement
-torch>=2.0.0
+# Text processing
 nltk>=3.8.1
 
-# Audio processing
-sounddevice>=0.4.6
-numpy>=1.20.0
-ffmpeg-python>=0.2.0
-soundfile>=0.12.1  # For saving audio files
-scipy
+# General purpose
+# numpy>=1.20.0
+# scipy
 
 # AI integration
-langchain>=0.0.267
-langchain-community>=0.0.5
+# langchain>=0.0.267
+# langchain-community>=0.0.5
 ollama
 
 # Add requests
@@ -40,13 +31,13 @@ pdfminer.six==20221105
 python-docx==0.8.11
 
 # Security
-cryptography>=36.0.0
+# cryptography>=36.0.0
 
 # Image processing
 Pillow>=9.0.0
 
 # Enable Xet storage support for Hugging Face Hub
-huggingface_hub[hf_xet]>=0.16.4
+# huggingface_hub[hf_xet]>=0.16.4
 
 # Audio input/output - marked as optional
 # PyAudio>=0.2.13 - This is installed separately in run.sh due to system dependencies

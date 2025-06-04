@@ -4,6 +4,7 @@ __pycache__/
 
 # Environment variables file
 .env
+deploy/.env
 
 # IDE and editor files
 .idea/

@@ -28,7 +28,7 @@ class LLMServiceFactory:
         """
         if service_type == 'ollama':
             try:
-                host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+                host = os.environ.get('OLLAMA_HOST', 'http://local-ollama:11434')  # Default to local-ollama service name
                 return OllamaService(host)
             except Exception as e:
                 logger.error("Error creating Ollama service: %s", e)
@@ -231,3 +231,71 @@ class OllamaService:
             error_text = f"Error streaming from Ollama: {str(e)}"
             escaped_text = json.dumps({"error": error_text, "text": f"⚠️ {error_text}"})
             yield f"data: {escaped_text}\n\n"
+
+    def pull_model(self, model_name: str, retries: int = 2, initial_delay: int = 10) -> bool:
+        import time
+        import requests
+        import json
+
+        api_url = f"{self.host}/api/pull"
+        payload = {"name": model_name, "stream": True}
+        
+        logger.info(f"Attempting to pull model '{model_name}' from {self.host}...")
+
+        for attempt in range(retries):
+            try:
+                # Set a longer timeout for the initial request, but iter_lines will keep it alive
+                response = requests.post(api_url, json=payload, stream=True, timeout=300) # Increased timeout for pull 
+                response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+
+                last_status_message = {}
+                logger.info(f"Streaming pull status for '{model_name}' (attempt {attempt + 1}/{retries}):")
+                for line in response.iter_lines():
+                    if line:
+                        try:
+                            chunk_data = json.loads(line.decode('utf-8'))
+                            last_status_message = chunk_data # Keep track of the latest message
+                            if "status" in chunk_data:
+                                # Log progress more selectively to avoid flooding logs
+                                if "total" in chunk_data and "completed" in chunk_data and chunk_data.get("total", 0) > 0:
+                                    progress = (chunk_data["completed"] * 100) // chunk_data["total"]
+                                    # Log at 0%, every 10%, and 100%
+                                    if progress == 0 or progress == 100 or (progress % 10 == 0 and progress > 0 and progress < 100):
+                                         logger.info(f"Pulling '{model_name}': {chunk_data['status']} - {progress}% ({chunk_data.get('completed', 0)}/{chunk_data.get('total', 0)})")
+                                elif chunk_data['status'] != 'pulling manifest' and not ('total' in chunk_data): # Avoid logging every single pulling manifest message unless it's different
+                                    logger.info(f"Pulling '{model_name}': {chunk_data['status']}")
+                            if "error" in chunk_data:
+                                logger.error(f"Error detail during pull of '{model_name}': {chunk_data['error']}")
+                                # Error in stream, likely means failure for this attempt
+                                break 
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to decode JSON line from pull stream: {line.decode('utf-8', errors='replace')[:100]}")
+                
+                # After stream ends, check the last message for definitive status
+                if "status" in last_status_message and last_status_message["status"] == "success":
+                    logger.info(f"Successfully pulled model '{model_name}'.")
+                    return True
+                elif "error" in last_status_message:
+                    logger.error(f"Failed to pull model '{model_name}'. Final error: {last_status_message['error']}")
+                else:
+                    # Check if the model now appears in the list as a fallback success check
+                    current_models = self.list_models()
+                    if any(m.startswith(model_name) for m in current_models):
+                        logger.info(f"Pull stream for '{model_name}' ended without explicit success, but model now appears in list. Assuming success.")
+                        return True
+                    logger.warning(f"Pull stream for '{model_name}' ended without clear success status. Last message: {last_status_message}. Model not found in list.")
+
+            except requests.exceptions.RequestException as e:
+                logger.error(f"RequestException while pulling model '{model_name}' (attempt {attempt + 1}/{retries}): {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error while pulling model '{model_name}' (attempt {attempt + 1}/{retries}): {e}")
+
+            if attempt < retries - 1:
+                current_delay = initial_delay * (2 ** attempt) # Exponential backoff
+                logger.info(f"Retrying pull for '{model_name}' in {current_delay} seconds...")
+                time.sleep(current_delay)
+            else:
+                logger.error(f"Failed to pull model '{model_name}' after {retries} attempts.")
+                return False
+        
+        return False # Should only be reached if retries is 0 or less

@@ -27,7 +27,7 @@ services:
       - "11434:11434"
     volumes:
       - ollama-models:/root/.ollama
-      - ./ollama_entrypoint.sh:/app/ollama_entrypoint.sh
+      - ./ollama_config/ollama_entrypoint.sh:/app/ollama_entrypoint.sh
     restart: unless-stopped
     entrypoint: ["/app/ollama_entrypoint.sh"]
     healthcheck:
@@ -38,15 +38,11 @@ services:
       start_period: 5s
 
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: mmdmirh/sadeh-app:latest
     container_name: ai-chat-web
     restart: unless-stopped
     ports:
       - "5001:5001"
-    volumes:
-      - ./ai_models:/app/ai_models
     depends_on:
       mysql:
         condition: service_healthy
@@ -65,6 +61,7 @@ services:
       DOCKER_ENV: "true"
       OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       DEFAULT_MODEL_NAME: ${DEFAULT_MODEL_NAME:-gemma3:1b}
+      LLM_MODELS: ${LLM_MODELS:-gemma3:1b,llama2} # Models to ensure are downloaded
 volumes:
   mysql-data:
   ollama-models:
