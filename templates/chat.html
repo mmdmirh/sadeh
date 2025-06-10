@@ -94,6 +94,7 @@
 
     <!-- Main content -->
     <main class="chat main-content">
+      {% if conversation %}
       <header class="chat-header">
         <button class="toggle-sidebar" id="toggle-sidebar"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <h1 class="page-title"><span id="conversation-title">{{ conversation.title }}</span></h1>
@@ -164,6 +165,24 @@
         </div>
       </div>
 
+      {% else %}
+      <div class="welcome-screen">
+        <div class="welcome-content">
+          <h2>Welcome to AI Assistant</h2>
+          <p>Get started by creating a new conversation</p>
+          <form action="{{ url_for('new_conversation') }}" method="post" class="welcome-new-chat-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="model" value="{{ models[0].ollama_model_name if models else '' }}">
+            <button type="submit" class="btn-new-chat">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"/></svg>
+              <span>New Conversation</span>
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if conversation %}
       <div class="chat-footer">
         <div class="input-container">
           <input type="hidden" id="conversation_id" value="{{ conversation.id }}">
@@ -182,6 +201,7 @@
           <div class="disclaimer">AI may produce inaccurate information about people, places, or facts.</div>
         </div>
       </div>
+      {% endif %}
     </main>
   </div>
   <div id="voiceModelModal" class="modal" style="display: none;"></div>

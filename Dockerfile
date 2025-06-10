@@ -12,6 +12,10 @@ ENV PYTHONDONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y default-mysql-client && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -19,11 +23,17 @@ RUN pip install --no-cache-dir --upgrade pip && \
     (sleep 5 && pip install --no-cache-dir -r requirements.txt) || \
     (sleep 10 && pip install --no-cache-dir -r requirements.txt)
 
-# Copy project
+# Copy project files
 COPY . .
+
+# Make wait script executable
+RUN chmod +x /app/wait-for-db.sh
 
 # Expose the port the app runs on
 EXPOSE 5001
 
+# Set the entrypoint to our wait script
+ENTRYPOINT ["/app/wait-for-db.sh"]
+
 # Command to run the application
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "app:app"]

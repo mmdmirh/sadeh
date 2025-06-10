@@ -395,9 +395,18 @@ def index():
             
     return render_template('index.html')
 
-@app.route('/ping')
+@app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
-    return 'pong'
+    """Simple health check endpoint"""
+    try:
+        # Check database connection
+        db.session.execute('SELECT 1')
+        response = "pong"
+        return response, 200, {'Content-Type': 'text/plain', 'Content-Length': str(len(response))}
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        response = "database connection error"
+        return response, 500, {'Content-Type': 'text/plain', 'Content-Length': str(len(response))}
 
 # ===========================
 # Ollama model listing at startup
@@ -760,22 +769,7 @@ def chat():
                 db.session.add(conversation) # Mark for update
     else: # No conversation_id, so it's a new session or fetching the latest conversation
         conversation = Conversation.query.filter_by(user_id=current_user.id).order_by(Conversation.created_at.desc()).first()
-        if not conversation: # No existing conversations, create a new one
-            initial_model_name = None
-            if available_models:
-                default_conv_model_dict = available_models[0]
-                initial_model_name = default_conv_model_dict.get('ollama_model_name')
-                logger.info(f"Creating first conversation for user {current_user.id} with model '{initial_model_name}'.")
-            else: # No models available for a new conversation
-                logger.warning(f"Cannot create new conversation for user {current_user.id} as no models are accessible. Initial model will be None.")
-            
-            conversation = Conversation(
-                user_id=current_user.id,
-                title="New Conversation",
-                selected_model=initial_model_name # Assign string or None
-            )
-            db.session.add(conversation)
-        elif conversation: # Existing conversation fetched as latest
+        if conversation: # Only process if there's an existing conversation
             model_needs_fallback_for_latest = False
             if not conversation.selected_model:
                 model_needs_fallback_for_latest = True
@@ -798,7 +792,9 @@ def chat():
 
 
     all_conversations = Conversation.query.filter_by(user_id=current_user.id).order_by(Conversation.created_at.desc()).all()
-    messages = ChatMessage.query.filter_by(conversation_id=conversation.id).order_by(ChatMessage.created_at).all()
+    messages = []
+    if conversation:
+        messages = ChatMessage.query.filter_by(conversation_id=conversation.id).order_by(ChatMessage.created_at).all()
 
     logger.debug(f"Chat Route: Final 'available_models' for template: {available_models}")
     logger.debug(f"Chat Route: Final 'conversation.selected_model' for UI: {conversation.selected_model if conversation else 'No conversation object'}")
@@ -2420,6 +2416,44 @@ def update_user_details():
 
 
 
+def init_db():
+    """Initialize the database with Flask-Migrate"""
+    with app.app_context():
+        # This will create the database tables if they don't exist
+        # and apply any pending migrations
+        from flask_migrate import upgrade
+        
+        # Create tables if they don't exist
+        db.create_all()
+        
+        # Apply any pending migrations
+        # Initialize RBAC data
+        initialize_rbac_data()
+        
+        # If you need to run any data migrations, you can add them here
+        # For example:
+        # migrate_data()
+
+
+def check_database_connection():
+    """Check if we can connect to the database"""
+    max_retries = 10
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            # Try to execute a simple query
+            db.session.execute('SELECT 1')
+            logger.info("Successfully connected to the database")
+            return True
+        except Exception as e:
+            retry_count += 1
+            logger.warning(f"Database connection failed (attempt {retry_count}/{max_retries}): {str(e)}")
+            if retry_count >= max_retries:
+                logger.error("Max retries reached. Could not connect to the database.")
+                return False
+            time.sleep(5)  # Wait before retrying
+
 if __name__ == '__main__':
     # Check dependencies
     system_deps = check_system_dependencies()
@@ -2432,18 +2466,21 @@ if __name__ == '__main__':
         # Don't exit in Docker, let it try to run
         # exit(1)
     
-    # === Add a startup message showing the LLM service type ===
     logger.info(f"Starting AI Chat application with {llm_service_type.upper()} as the LLM service")
     
-    logger.info("MAIN: Attempting to enter app_context for db.create_all()...") # Cascade Temp Log
-    with app.app_context():
-        logger.info("MAIN: Inside app_context. Attempting db.create_all()...") # Cascade Temp Log
-        db.create_all()
-        initialize_rbac_data() # Initialize roles and models
+    # Wait for database to be ready
+    if not check_database_connection():
+        logger.error("Failed to connect to the database. Exiting...")
+        exit(1)
     
-    # === Update app.run for Docker ===
-    # Use host='0.0.0.0' to be accessible outside the container
-    # Use port=5001 as exposed in Dockerfile/docker-compose.yml
-
-
-app.run(debug=True, host='0.0.0.0', port=5001)
+    # Initialize database and apply migrations
+    try:
+        logger.info("Initializing database...")
+        init_database()
+        logger.info("Database initialization completed successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {str(e)}")
+        exit(1)
+    
+    # Run the application
+    app.run(debug=True, host='0.0.0.0', port=5001)

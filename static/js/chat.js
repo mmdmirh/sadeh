@@ -261,6 +261,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isAiResponding || !promptInput) return;
     const text = promptInput.value.trim();
     if (!text) return;
+    
+    // Check if there's a conversation selected
+    const conversationId = document.getElementById('conversation_id')?.value;
+    if (!conversationId) {
+        // If no conversation is selected, show an error message
+        displayChatMessage('ai', 'Please create a new conversation first before sending messages.', true);
+        return;
+    }
 
     displayChatMessage('user', text);
     promptInput.value = '';

@@ -5,9 +5,12 @@
 !llm_service.py
 !speech_service.py
 !requirements.txt
+!wait-for-db.sh
 !static/css/**
 !static/js/**
 !templates/**
+!migrations/**
+!deploy/**
 # Still exclude large files/dirs even if in included directories
 **/*.bin
 **/*.gguf

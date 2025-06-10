@@ -1061,3 +1061,61 @@ body {
         box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
     }
 }
+
+/* Welcome Screen Styles */
+.welcome-screen {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    padding: var(--space-8);
+    text-align: center;
+    background-color: var(--bg-light);
+}
+
+.welcome-content {
+    max-width: 500px;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-6);
+    background: var(--bg-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+
+.welcome-content h2 {
+    font-size: 1.75rem;
+    color: var(--primary);
+    margin-bottom: var(--space-4);
+}
+
+.welcome-content p {
+    color: var(--text-normal);
+    margin-bottom: var(--space-6);
+    font-size: 1.1rem;
+}
+
+.welcome-new-chat-form .btn-new-chat {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 500;
+    color: white;
+    background-color: var(--primary);
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.welcome-new-chat-form .btn-new-chat:hover {
+    background-color: var(--primary-dark);
+}
+
+.welcome-new-chat-form .btn-new-chat svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
