@@ -1,10 +1,90 @@
-# AI Chat Application
+# Sadeh: AI Chat Application (Dockerized)
 
-An AI chat application that uses Ollama or Llama.cpp to interact with various AI models and provides multilingual voice recognition (using Whisper) and text-to-speech (using Bark).
+Sadeh is an AI chat application that uses Ollama to interact with various AI models, with multilingual voice recognition (Whisper) and text-to-speech (Bark) capabilities. This setup is fully containerized using Docker Compose for easy deployment and reproducibility.
 
-## Running with Docker (Recommended)
+## Features
+- Chat with locally served Ollama models (e.g., gemma3:1b, llama2, phi3, etc.)
+- Automatic model download at app startup (no manual pre-pull required)
+- MySQL database backend
+- Voice recognition (Whisper) and TTS (Bark)
 
-This method uses Docker Compose to build the application image and run it alongside MySQL, **Ollama**, and **Llama.cpp** containers. **Default models for Ollama and Llama.cpp will be downloaded automatically if they are not found.**
+## Quick Start (Docker Compose)
+
+### 1. Prerequisites
+- **Docker & Docker Compose** (Docker Desktop recommended)
+- Sufficient RAM for your chosen models (at least 4–8GB for most models)
+
+### 2. Clone the Repository
+```bash
+git clone https://github.com/mmdmirh/sadeh.git
+cd sadeh
+```
+
+### 3. Configure Environment Variables
+- Copy the example env file:
+  ```bash
+  cp deploy/.env.example deploy/.env
+  ```
+- Edit `deploy/.env` and set:
+  - `SECRET_KEY` (Flask secret)
+  - MySQL credentials (`MYSQL_USER`, `MYSQL_PASSWORD`, etc.)
+  - `LLM_MODELS` – comma-separated list of Ollama models to ensure are downloaded (e.g. `gemma3:1b,llama2`)
+  - `DEFAULT_MODEL_NAME` – the default model the app will use (e.g. `gemma3:1b`)
+  - `OLLAMA_HOST` – leave as `http://ollama:11434` for Docker Compose
+
+### 4. Build & Run with Docker Compose
+From the `deploy/` directory:
+```bash
+docker compose up -d --build
+```
+- This will build your app image and start MySQL, Ollama, and the app.
+- The app will wait for Ollama and MySQL to be healthy before starting.
+
+### 5. Model Download Automation
+- On first startup, the app will check for all models listed in `LLM_MODELS` and `DEFAULT_MODEL_NAME`.
+- Any missing models will be pulled from the Ollama registry automatically via the Ollama API.
+- Model files are stored in the `ollama-models` Docker volume (managed by the Ollama container).
+
+### 6. Access the Application
+- Open your browser and go to: [http://localhost:5001](http://localhost:5001)
+
+### 7. Logs & Troubleshooting
+- View app logs:
+  ```bash
+  docker compose logs -f web
+  ```
+- View Ollama logs:
+  ```bash
+  docker compose logs -f ollama
+  ```
+- If you encounter DNS/network errors with model downloads, check your Docker Desktop network settings and ensure your host has internet access.
+
+### 8. Stopping & Cleaning Up
+- Stop all services:
+  ```bash
+  docker compose down
+  ```
+- To remove all data volumes (including MySQL and Ollama models):
+  ```bash
+  docker compose down -v
+  ```
+
+## Environment Variables Reference
+See `deploy/.env.example` for all available options. Key variables:
+- `SECRET_KEY` – Flask app secret
+- `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_ROOT_PASSWORD` – MySQL configuration
+- `LLM_MODELS` – comma-separated models to ensure are present (e.g. `gemma3:1b,llama2`)
+- `DEFAULT_MODEL_NAME` – default model for chat
+- `OLLAMA_HOST` – should be `http://ollama:11434` in Docker Compose
+
+## Notes
+- Ollama models are cached in the Docker volume `ollama-models` and are not lost between restarts unless you remove volumes.
+- The app will always check and pull missing models at startup for robustness.
+- No manual model download is required for Ollama models listed in your `.env` file.
+
+---
+
+For advanced configuration or manual (non-Docker) usage, see older instructions or contact the maintainer.
 
 1.  **Prerequisites:**
     *   **Docker and Docker Compose:** Install from [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine/Compose for Linux.

@@ -66,6 +66,33 @@ class OllamaService:
         logger.error("Failed to connect to Ollama service at {} after {} attempts".format(self.host, max_retries))
         return False
     
+    def list_models_info(self) -> List[Dict[str, Any]]:
+        """Fetches detailed information for all available Ollama models."""
+        try:
+            import requests
+            response = requests.get(f"{self.host}/api/tags", timeout=10) # Increased timeout slightly
+            response.raise_for_status() # Raise an exception for bad status codes
+            
+            data = response.json()
+            logger.debug(f"Raw response from Ollama /api/tags: {str(data)[:500]}...") # Log more for debug
+            
+            models_info = data.get("models", [])
+            if not isinstance(models_info, list):
+                logger.error(f"Ollama /api/tags returned 'models' but it's not a list: {type(models_info)}")
+                return []
+            
+            logger.info(f"Successfully fetched info for {len(models_info)} models from Ollama.")
+            return models_info
+        except requests.exceptions.RequestException as e:
+            logger.error(f"RequestException listing detailed Ollama models: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONDecodeError listing detailed Ollama models: {response.text[:200]}... Error: {e}")
+            return []
+        except Exception as e:
+            logger.exception(f"Unexpected error listing detailed Ollama models: {e}")
+            return []
+
     def list_models(self) -> List[str]:
         try:
             import requests

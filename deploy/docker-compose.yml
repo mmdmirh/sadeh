@@ -37,6 +37,7 @@ services:
       retries: 3
       start_period: 5s
 
+# --- Web Service ---
   web:
     image: mmdmirh/sadeh-app:latest
     container_name: ai-chat-web
@@ -50,7 +51,7 @@ services:
         condition: service_healthy
     environment:
       FLASK_APP: ${FLASK_APP:-app.py}
-      FLASK_ENV: ${FLASK_ENV:-development}
+      FLASK_ENV: ${FLASK_ENV:-production}
       SECRET_KEY: ${SECRET_KEY:-you-will-never-guess}
       MYSQL_USER: ${MYSQL_USER:-your_user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-your_password}

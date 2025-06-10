@@ -12,10 +12,12 @@ import threading
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, send_file, jsonify, session, stream_with_context
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, current_user, login_required, UserMixin
+from flask_migrate import Migrate
 from flask_mail import Mail, Message
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
+from flask_wtf.csrf import CSRFProtect
 import subprocess
 from ollama import RequestError, ResponseError
 
@@ -24,8 +26,22 @@ from llm_service import LLMServiceFactory
 
 # Speech service functionality has been removed
 
+# Add logging setup near the top of your file, after imports
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Define application pages/endpoints that can have access controlled
+MANAGED_PAGE_ENDPOINTS = [
+    {'endpoint': 'index', 'display_name': 'Home Page', 'description': 'The main landing page of the application.'},
+    {'endpoint': 'chat', 'display_name': 'Chat Interface', 'description': 'The primary chat functionality.'},
+    {'endpoint': 'admin_rbac_page', 'display_name': 'Access Control', 'description': 'This admin page for managing roles, users, and permissions.'},
+    # {'endpoint': 'profile', 'display_name': 'User Profile', 'description': 'User profile viewing and editing page.'}, # Example for future
+    # {'endpoint': 'settings', 'display_name': 'User Settings', 'description': 'User-specific application settings.'} # Example for future
+]
+
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(dotenv_path='deploy/.env')
 
 # Ensure static directories exist
 if not os.path.exists('static'):
@@ -39,6 +55,7 @@ if not os.path.exists('static/uploads'):
 
 app = Flask(__name__, static_folder='static')
 app.secret_key = os.environ.get('SECRET_KEY', 'you-will-never-guess')
+csrf = CSRFProtect(app)
 
 # Retrieve individual MySQL settings from .env
 mysql_user = os.environ.get('MYSQL_USER')
@@ -49,12 +66,14 @@ mysql_host = os.environ.get('MYSQL_HOST', 'mysql')
 mysql_port = os.environ.get('MYSQL_PORT', '3306') # Internal Docker port
 
 # Build the SQLAlchemy connection string dynamically.
+logger.info(f"Attempting to connect to MySQL with host: '{mysql_host}' and port: '{mysql_port}'")
 connection_str = f"mysql+pymysql://{mysql_user}:{mysql_password}@{mysql_host}:{mysql_port}/{mysql_database}"
 app.config['SQLALCHEMY_DATABASE_URI'] = connection_str
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize SQLAlchemy AFTER app is created and configured
 db = SQLAlchemy(app)
+migrate = Migrate(app, db, compare_type=True)
 
 # Configure Flask-Mail (read SMTP settings from environment)
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.example.com')
@@ -67,24 +86,98 @@ mail = Mail(app)
 
 # Configure Flask-Login
 login_manager = LoginManager(app)
-login_manager.login_view = 'login'
+login_manager.login_view = 'index'
 
-# Add logging setup near the top of your file, after imports
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# === Initialize LLM Service ===
+# === Initialize LLM Service and Manage Models ===
 llm_service_type = os.environ.get('LLM_SERVICE', 'ollama').lower()
 logger.info(f"Initializing LLM service of type: {llm_service_type}")
-llm_service = LLMServiceFactory.create_service()
+llm_service = LLMServiceFactory.create_service() # This might call test_connection
 
-# Define a default model name based on the LLM service type
+# Store successfully managed models and the effective default model in app.config
+app.config['MANAGED_OLLAMA_MODELS'] = []
+app.config['EFFECTIVE_DEFAULT_MODEL_NAME'] = None
+DEFAULT_MODEL_NAME = None # Will be determined by the logic below
+
 if llm_service_type == 'ollama':
-    DEFAULT_MODEL_NAME = os.environ.get('DEFAULT_MODEL_NAME', "gemma3:1b")
-else:  # llamacpp
-    DEFAULT_MODEL_NAME = os.environ.get('LLAMACPP_MODEL', "llama-2-7b-chat.Q4_K_M.gguf")
+    if llm_service and hasattr(llm_service, 'test_connection') and llm_service.test_connection(): # Ensure service is responsive
+        ollama_models_env = os.environ.get('OLLAMA_MODELS')
+        if ollama_models_env:
+            managed_model_names_from_env = [name.strip() for name in ollama_models_env.split(',') if name.strip()]
+            logger.info(f"Target Ollama models from OLLAMA_MODELS env var: {managed_model_names_from_env}")
 
-logger.info(f"Using default model: {DEFAULT_MODEL_NAME}")
+            current_ollama_server_models = llm_service.list_models() # Get models currently on server
+            logger.info(f"Models currently on Ollama server: {current_ollama_server_models}")
+
+            successfully_managed_models_list = []
+            for model_name in managed_model_names_from_env:
+                is_on_server = False
+                for server_model in current_ollama_server_models:
+                    if server_model == model_name or server_model.startswith(model_name + ":"):
+                        is_on_server = True
+                        break
+                
+                if is_on_server:
+                    logger.info(f"Model '{model_name}' is already available on Ollama server.")
+                    successfully_managed_models_list.append(model_name)
+                else:
+                    logger.info(f"Model '{model_name}' not found on Ollama server. Attempting to pull...")
+                    if llm_service.pull_model(model_name): # pull_model returns True on success
+                        logger.info(f"Successfully pulled model '{model_name}'.")
+                        successfully_managed_models_list.append(model_name)
+                    else:
+                        logger.warning(f"Failed to pull model '{model_name}'. It will not be available through this managed list.")
+            
+            app.config['MANAGED_OLLAMA_MODELS'] = successfully_managed_models_list
+            logger.info(f"Successfully managed Ollama models (available/pulled): {app.config['MANAGED_OLLAMA_MODELS']}")
+        else:
+            logger.warning("OLLAMA_MODELS environment variable not set. No specific Ollama models will be pre-managed/pulled.")
+            # If OLLAMA_MODELS is not set, MANAGED_OLLAMA_MODELS remains empty.
+            # initialize_rbac_data will then not add any models from this list.
+
+        # Determine DEFAULT_MODEL_NAME for Ollama
+        env_default_model_from_env = os.environ.get('DEFAULT_MODEL_NAME')
+        effective_default = None
+
+        if env_default_model_from_env:
+            if env_default_model_from_env in app.config['MANAGED_OLLAMA_MODELS']:
+                effective_default = env_default_model_from_env
+            else:
+                logger.warning(f"DEFAULT_MODEL_NAME '{env_default_model_from_env}' from .env is not in the list of successfully managed models ({app.config['MANAGED_OLLAMA_MODELS']}).")
+                if app.config['MANAGED_OLLAMA_MODELS']:
+                    effective_default = app.config['MANAGED_OLLAMA_MODELS'][0]
+                    logger.warning(f"Falling back to the first managed model as default: '{effective_default}'.")
+                else:
+                    logger.error("No managed Ollama models available. Cannot set a default model from managed list.")
+        elif app.config['MANAGED_OLLAMA_MODELS']:
+            effective_default = app.config['MANAGED_OLLAMA_MODELS'][0]
+            logger.info(f"DEFAULT_MODEL_NAME not set in .env. Using the first managed model as default: '{effective_default}'.")
+        else:
+            logger.warning("DEFAULT_MODEL_NAME not set in .env and no managed Ollama models available. Default model not set from managed list.")
+        
+        app.config['EFFECTIVE_DEFAULT_MODEL_NAME'] = effective_default
+        DEFAULT_MODEL_NAME = effective_default 
+    else:
+        logger.error("Ollama service is not available or failed connection test. Cannot manage Ollama models or set default.")
+        app.config['MANAGED_OLLAMA_MODELS'] = [] # Ensure it's empty
+        app.config['EFFECTIVE_DEFAULT_MODEL_NAME'] = None
+        DEFAULT_MODEL_NAME = None
+
+elif llm_service_type == 'llamacpp':
+    DEFAULT_MODEL_NAME = os.environ.get('LLAMACPP_MODEL', "llama-2-7b-chat.Q4_K_M.gguf")
+    app.config['EFFECTIVE_DEFAULT_MODEL_NAME'] = DEFAULT_MODEL_NAME
+    # LlamaCPP models are not currently managed via OLLAMA_MODELS env var
+    app.config['MANAGED_OLLAMA_MODELS'] = [] # Ensure this is empty for non-ollama services
+else:
+    logger.error(f"Unsupported LLM_SERVICE_TYPE '{llm_service_type}'. No default model configured through this logic.")
+    DEFAULT_MODEL_NAME = None
+    app.config['EFFECTIVE_DEFAULT_MODEL_NAME'] = None
+    app.config['MANAGED_OLLAMA_MODELS'] = []
+
+if DEFAULT_MODEL_NAME:
+    logger.info(f"Global DEFAULT_MODEL_NAME set to: {DEFAULT_MODEL_NAME}")
+else:
+    logger.warning("Global DEFAULT_MODEL_NAME could not be determined based on configuration and service availability.")
 
 # Add a template filter for converting newlines to <br> tags
 @app.template_filter('nl2br')
@@ -110,17 +203,67 @@ except Exception as e:
 print("==============================\n")
 
 # ===========================
+# Association Tables for RBAC
+# ===========================
+# Association table for User and Role (many-to-many)
+user_roles = db.Table('user_roles',
+    db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
+    db.Column('role_id', db.Integer, db.ForeignKey('role.id'), primary_key=True)
+)
+
+# Association table for Role and Model (many-to-many)
+role_models = db.Table('role_models',
+    db.Column('role_id', db.Integer, db.ForeignKey('role.id'), primary_key=True),
+    db.Column('model_id', db.Integer, db.ForeignKey('model.id'), primary_key=True)
+)
+
+# No explicit association table needed for PagePermission as it's a direct model with a ForeignKey to Role (one-to-many from Role's perspective)
+
+# ===========================
 # Database Models
 # ===========================
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
+    firstname = db.Column(db.String(100), nullable=True)
+    lastname = db.Column(db.String(100), nullable=True)
     # Increase length from 256 to 512 to accommodate modern hashes like scrypt
     password_hash = db.Column(db.String(512))
     confirmed = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)  # New field for user active status
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     conversations = db.relationship('Conversation', backref='user', lazy=True)
+
+    # Relationship for roles (many-to-many)
+    # Roles assigned to this user
+    roles = db.relationship('Role', secondary=user_roles,
+                            lazy='subquery', backref=db.backref('users_in_role', lazy=True))
+
+    def can_access_page(self, page_endpoint):
+        """Check if the user can access a specific page based on their roles."""
+        if not self.is_active:
+            return False
+        # Admins have access to all pages by default (conventionally)
+        if self.has_role('admin'):
+            return True
+        for role in self.roles:
+            if role.has_page_access(page_endpoint):
+                return True
+        return False
+
+    def has_role(self, role_name):
+        """Check if the user has a specific role."""
+        return any(role.name == role_name for role in self.roles)
+
+    def can_access_model(self, model_id):
+        """Check if the user can access a specific model based on their roles."""
+        if self.has_role('admin'): # Admins can access all models
+            return True
+        for role in self.roles:
+            if role.has_model_access(model_id):
+                return True
+        return False
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -156,12 +299,100 @@ class Document(db.Model):
 # ===========================
 # Flask-Login loader
 # ===========================
+
+class PagePermission(db.Model):
+    __tablename__ = 'page_permission'
+    id = db.Column(db.Integer, primary_key=True)
+    role_id = db.Column(db.Integer, db.ForeignKey('role.id'), nullable=False)
+    page_endpoint = db.Column(db.String(255), nullable=False) # e.g., 'chat', 'admin_rbac_page'
+
+    # Unique constraint to prevent duplicate permissions for the same role and page
+    __table_args__ = (db.UniqueConstraint('role_id', 'page_endpoint', name='_role_page_uc'),)
+
+    def __repr__(self):
+        return f"<PagePermission role_id={self.role_id} page='{self.page_endpoint}'>"
+
+
+class Role(db.Model):
+    __tablename__ = 'role'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+
+    # Relationship to Model (many-to-many)
+    # Models that this role has access to
+    models = db.relationship('Model', secondary=role_models,
+                             lazy='subquery', backref=db.backref('roles_having_access', lazy=True))
+
+    # Relationship to PagePermission (one-to-many: one Role can have many PagePermissions)
+    page_permissions = db.relationship('PagePermission', backref='role', lazy='dynamic', cascade="all, delete-orphan")
+
+    def has_page_access(self, page_endpoint):
+        """Check if this role has permission for a specific page endpoint."""
+        return self.page_permissions.filter_by(page_endpoint=page_endpoint).first() is not None
+
+    def has_model_access(self, model_id):
+        """Check if this role has access to a specific model by its ID."""
+        # self.models is the relationship to Model (many-to-many)
+        if not hasattr(self, 'models') or not self.models:
+            return False
+        return any(model.id == model_id for model in self.models)
+
+    def __repr__(self):
+        return f'<Role {self.name}>'
+
+class Model(db.Model):
+    __tablename__ = 'model'
+    id = db.Column(db.Integer, primary_key=True)
+    # The exact name Ollama uses, e.g., "llama3:8b-instruct-q5_K_M"
+    ollama_model_name = db.Column(db.String(128), unique=True, nullable=False, index=True)
+    # A user-friendly name for UIs, e.g., "Llama 3 8B Instruct"
+    display_name = db.Column(db.String(128), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    # Useful for grouping or identifying the family of the model, e.g., "llama3", "gemma"
+    base_model_identifier = db.Column(db.String(128), nullable=True)
+    # Flag to enable/disable in the app without deleting from DB or Ollama
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    # 'roles_having_access' backref is created by Role.models relationship
+
+    def __repr__(self):
+        return f'<Model {self.display_name} ({self.ollama_model_name})>'
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
+    if current_user.is_authenticated:
+        return redirect(url_for('chat'))
+
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        user = User.query.filter_by(email=email).first()
+
+        if not user or not user.check_password(password):
+            flash("Invalid email or password.", 'danger')
+            return redirect(url_for('index'))
+
+        if not user.confirmed:
+            flash("Please confirm your email before logging in.", 'warning')
+            return redirect(url_for('index'))
+        
+        if not user.is_active:
+            flash("Your account is inactive. Please contact your administrator.", 'danger')
+            return redirect(url_for('index'))
+
+        login_user(user)
+        next_page = request.args.get('next')
+        if next_page and next_page.startswith('/'):
+            return redirect(next_page)
+        else:
+            return redirect(url_for('chat'))
+            
     return render_template('index.html')
 
 @app.route('/ping')
@@ -173,58 +404,123 @@ def ping():
 # ===========================
 def load_and_ensure_llm_models():
     """Loads model list, ensures default (and specified) models are pulled if missing."""
-    desired_models_from_env = []
-    models_env_str = os.environ.get('LLM_MODELS')
-    if models_env_str:
-        desired_models_from_env = [m.strip() for m in models_env_str.split(',') if m.strip()]
-        logger.info(f"Models specified in LLM_MODELS env: {desired_models_from_env}")
+    with app.app_context(): # Ensure all operations run within app context
+        # Use the centrally managed list of Ollama models from app.config
+        managed_ollama_models = app.config.get('MANAGED_OLLAMA_MODELS', [])
+        logger.info(f"LOAD_AND_ENSURE: Using MANAGED_OLLAMA_MODELS from app.config: {managed_ollama_models}")
 
-    models_to_ensure = set(desired_models_from_env)
-    if DEFAULT_MODEL_NAME:
-        models_to_ensure.add(DEFAULT_MODEL_NAME)
-    
-    if not models_to_ensure:
-        logger.warning("No LLM_MODELS in env and no DEFAULT_MODEL_NAME set. Cannot ensure any models.")
-        # Attempt to list whatever is there, or return empty if service fails
-        try:
-            return llm_service.list_models()
-        except Exception as e:
-            logger.exception(f"Error listing models when no specific models were targeted: {e}")
-            return []
-
-    logger.info(f"Models to ensure are available: {list(models_to_ensure)}")
-
-    try:
-        available_models_before_pull = llm_service.list_models()
-        logger.info(f"Models available before pull attempt: {available_models_before_pull}")
-
-        for model_name in models_to_ensure:
-            # Check if model or any variant (e.g., model_name:latest) is present
-            is_present = any(m.startswith(model_name) for m in available_models_before_pull)
-            if not is_present:
-                logger.info(f"Model '{model_name}' not found locally. Attempting to pull...")
-                pull_success = llm_service.pull_model(model_name, retries=2, initial_delay=10)
-                if pull_success:
-                    logger.info(f"Successfully pulled '{model_name}'.")
-                else:
-                    logger.error(f"Failed to pull '{model_name}'. It might not be available for use.")
-            else:
-                logger.info(f"Model '{model_name}' or a variant is already available.")
-
-        final_available_models = llm_service.list_models()
-        logger.info(f"Models available after pull attempts: {final_available_models}")
+        models_to_ensure = set(managed_ollama_models) # Start with all managed models
         
-        if not final_available_models and DEFAULT_MODEL_NAME: # If list is empty, but we have a default
-            logger.warning(f"No models seem to be available even after pull attempts. UI will show default: {DEFAULT_MODEL_NAME}")
-            return [DEFAULT_MODEL_NAME] 
-        return final_available_models
+        # DEFAULT_MODEL_NAME should already be in managed_ollama_models if valid,
+        # but adding it here ensures it's considered if somehow missed or if it's a LlamaCPP model not in OLLAMA_MODELS.
+        if DEFAULT_MODEL_NAME: 
+            models_to_ensure.add(DEFAULT_MODEL_NAME)
+        
+        logger.info(f"LOAD_AND_ENSURE: Final models_to_ensure (after adding default if needed): {list(models_to_ensure)}")
 
-    except Exception as e:
-        logger.exception(f"Error during model loading and pulling process: {e}")
-        if DEFAULT_MODEL_NAME:
-            logger.warning(f"Proceeding with fallback default model name for UI due to error: {DEFAULT_MODEL_NAME}")
-            return [DEFAULT_MODEL_NAME]
-        return [] # Fallback to empty list if no default model name
+        available_models = []
+        try:
+            all_active_db_models = Model.query.filter_by(is_active=True).all()
+            active_db_model_names = {model.ollama_model_name for model in all_active_db_models}
+            logger.info(f"Active models from DB: {active_db_model_names}")
+
+            if llm_service_type == 'ollama':
+                try:
+                    initial_server_models_list = llm_service.list_models()
+                    initial_server_models_set = set(initial_server_models_list)
+                    logger.info(f"LOAD_AND_ENSURE: Initial models on Ollama server: {initial_server_models_set}")
+
+                    models_pulled_this_run = set()
+                    # Ensure managed models are pulled if not on server
+                    for model_name_to_pull in managed_ollama_models: # managed_ollama_models is from app.config
+                        if model_name_to_pull not in initial_server_models_set:
+                            try:
+                                logger.info(f"LOAD_AND_ENSURE: Model '{model_name_to_pull}' (managed) not on server. Attempting to pull...")
+                                llm_service.pull_model(model_name_to_pull)
+                                logger.info(f"LOAD_AND_ENSURE: Successfully pulled model '{model_name_to_pull}'.")
+                                models_pulled_this_run.add(model_name_to_pull)
+                            except Exception as e:
+                                logger.error(f"LOAD_AND_ENSURE: Failed to pull managed model '{model_name_to_pull}': {e}")
+                    
+                    final_server_models_set = initial_server_models_set.union(models_pulled_this_run)
+                    logger.info(f"LOAD_AND_ENSURE: Final models on Ollama server (after pulls): {final_server_models_set}")
+
+                    # Populate available_models from all models now on the server that are also active in DB
+                    for server_model_name in final_server_models_set:
+                        if server_model_name in active_db_model_names:
+                            db_model_obj = next((m for m in all_active_db_models if m.ollama_model_name == server_model_name), None)
+                            if db_model_obj: # Should be true if server_model_name in active_db_model_names
+                                available_models.append({
+                                    'id': db_model_obj.id,
+                                    'name': db_model_obj.display_name or db_model_obj.ollama_model_name,
+                                    'ollama_model_name': db_model_obj.ollama_model_name,
+                                    'is_default': db_model_obj.ollama_model_name == DEFAULT_MODEL_NAME
+                                })
+                except RequestError as re:
+                    logger.error(f"Ollama RequestError when ensuring models: {re}. This might happen if Ollama is not running or not reachable.")
+                    # Fallback: only use models already in DB if Ollama is down and they were in models_to_ensure
+                    for db_model in all_active_db_models:
+                        if db_model.ollama_model_name in models_to_ensure:
+                            available_models.append({
+                                'id': db_model.id,
+                                'name': db_model.display_name or db_model.ollama_model_name,
+                                'ollama_model_name': db_model.ollama_model_name,
+                                'is_default': db_model.ollama_model_name == DEFAULT_MODEL_NAME
+                            })
+
+            elif llm_service_type == 'llamacpp':
+                if DEFAULT_MODEL_NAME in active_db_model_names:
+                    db_model_obj = next((m for m in all_active_db_models if m.ollama_model_name == DEFAULT_MODEL_NAME), None)
+                    if db_model_obj:
+                        available_models.append({
+                            'id': db_model_obj.id,
+                            'name': db_model_obj.display_name, # Corrected to display_name
+                            'ollama_model_name': db_model_obj.ollama_model_name,
+                            'is_default': True
+                        })
+                else:
+                    logger.warning(f"LlamaCPP model '{DEFAULT_MODEL_NAME}' is not marked active in the database.")
+
+            # Consolidate fallback for empty available_models
+            if not available_models and DEFAULT_MODEL_NAME and DEFAULT_MODEL_NAME in active_db_model_names:
+                logger.info(f"No specific models made it to available_models list, but default '{DEFAULT_MODEL_NAME}' is active. Adding it.")
+                db_model_obj = next((m for m in all_active_db_models if m.ollama_model_name == DEFAULT_MODEL_NAME), None)
+                if db_model_obj:
+                    available_models.append({
+                        'id': db_model_obj.id,
+                        'name': db_model_obj.display_name, # Corrected to display_name
+                        'ollama_model_name': db_model_obj.ollama_model_name,
+                        'is_default': True
+                    })
+            
+            if DEFAULT_MODEL_NAME:
+                available_models.sort(key=lambda x: x['ollama_model_name'] != DEFAULT_MODEL_NAME)
+
+            return available_models
+
+        except Exception as e:
+            logger.exception(f"Error during model loading and pulling process (within app_context): {e}")
+            # Fallback logic if an error occurs even within the app_context
+            if DEFAULT_MODEL_NAME:
+                # Check if DEFAULT_MODEL_NAME exists in the database as a last resort
+                try:
+                    default_db_model = Model.query.filter_by(ollama_model_name=DEFAULT_MODEL_NAME, is_active=True).first()
+                    if default_db_model:
+                        logger.warning(f"Proceeding with fallback default model for UI due to error: {default_db_model.ollama_model_name} (from DB)")
+                        available_models.append({
+                            'id': default_db_model.id,
+                            'name': default_db_model.display_name,  
+                            'ollama_model_name': default_db_model.ollama_model_name, 
+                            'is_default': True,
+                            'description': default_db_model.description
+                        })
+                except Exception as db_e:
+                    logger.error(f"Could not even fetch default model from DB during fallback: {db_e}")
+                
+                logger.warning(f"Proceeding with fallback default model name (string only) for UI due to error: {DEFAULT_MODEL_NAME}")
+                # Return a structure consistent with what the chat route expects if possible, even if it's just the name
+                return [{'name': DEFAULT_MODEL_NAME, 'ollama_model_name': DEFAULT_MODEL_NAME, 'is_default': True, 'id': None}]
+            return []
 
 llm_models = load_and_ensure_llm_models()
 app.config['LLM_MODELS'] = llm_models if llm_models else ([DEFAULT_MODEL_NAME] if DEFAULT_MODEL_NAME else [])
@@ -262,49 +558,6 @@ def detect_language(audio_file_path):
 # ===========================
 # Routes for Authentication
 # ===========================
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username = request.form['username'].strip()
-        email = request.form['email'].strip()
-        password = request.form['password']
-        logger.info(f"Registration attempt - Username: '{username}', Email: '{email}'") # Add logging
-
-        existing_user_by_username = User.query.filter_by(username=username).first()
-        existing_user_by_email = User.query.filter_by(email=email).first()
-
-        error = False
-        if existing_user_by_username:
-            logger.warning(f"Registration failed: Username '{username}' already exists.") # Add logging
-            flash("Username already exists. Please choose a different one.")
-            error = True
-        if existing_user_by_email:
-            logger.warning(f"Registration failed: Email '{email}' already registered.") # Add logging
-            flash("Email address already registered. Please log in or use a different email.")
-            error = True
-
-        if error:
-            logger.info("Redirecting back to register page due to duplicate username/email.") # Add logging
-            return redirect(url_for('register'))
-
-        # If checks pass, create the new user
-        logger.info(f"Proceeding with registration for Username: '{username}', Email: '{email}'") # Add logging
-        user = User(username=username, email=email)
-        user.set_password(password)
-        user.confirmed = True
-        try:
-            db.session.add(user)
-            db.session.commit()
-            logger.info(f"User '{username}' registered successfully.") # Add logging
-            flash("Registration successful! You can now log in.")
-            return redirect(url_for('login'))
-        except Exception as e: # Catch potential commit errors (though checks should prevent most)
-             logger.error(f"Error during user registration commit: {e}")
-             db.session.rollback()
-             flash("An error occurred during registration. Please try again.")
-             return redirect(url_for('register'))
-
-    return render_template('register.html')
     
 @app.route('/confirm/<token>')
 def confirm_email(token):
@@ -312,34 +565,22 @@ def confirm_email(token):
         user_id = int(token.split('-')[0])
     except Exception:
         flash("Invalid confirmation token.")
-        return redirect(url_for('login'))
+        return redirect(url_for('index'))
     user = db.session.get(User, user_id)
     if user:
         user.confirmed = True
         db.session.commit()
         flash("Your account has been confirmed!")
-    return redirect(url_for('login'))
+    return redirect(url_for('index'))
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
-        user = User.query.filter_by(email=email).first()
-        if user and user.check_password(password):
-            if not user.confirmed:
-                flash("Please confirm your email before logging in.")
-                return redirect(url_for('login'))
-            login_user(user)
-            return redirect(url_for('chat'))
-        flash("Invalid email or password.")
-    return render_template('login.html')
+
 
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
-    return redirect(url_for('login'))
+    flash('You have been logged out.', 'info')
+    return redirect(url_for('index'))
     
 @app.route('/reset', methods=['GET', 'POST'])
 def reset_request():
@@ -355,7 +596,7 @@ def reset_request():
             flash("Password reset email sent.")
         else:
             flash("Email not found.")
-    return render_template('reset_request.html')
+    return render_template('reset_password_coming_soon.html')
 
 @app.route('/reset_password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
@@ -379,6 +620,9 @@ def reset_password(token):
 @app.route('/chat', methods=['GET', 'POST'])
 @login_required
 def chat():
+    if not current_user.can_access_page('chat'):
+        flash('You do not have permission to access this page.', 'danger')
+        return redirect(url_for('index'))
     # Check if user has a preferred LLM service
     user_service = session.get('user_llm_service')
     global llm_service
@@ -407,63 +651,213 @@ def chat():
     
     # Continue with the existing chat route logic
     conversation_id = request.args.get('conversation_id', None)
-    available_models = app.config['LLM_MODELS']
+    llm_models_config = app.config.get('LLM_MODELS', [])
+    logger.debug(f"Chat Route: Initial llm_models_config from app.config: {llm_models_config}")
+    processed_ollama_names = []
+
+    if isinstance(llm_models_config, list):
+        for item in llm_models_config:
+            if isinstance(item, str):
+                processed_ollama_names.append(item)
+            elif isinstance(item, dict):
+                model_name = item.get('ollama_model_name')
+                if model_name and isinstance(model_name, str):
+                    processed_ollama_names.append(model_name)
+                else:
+                    logger.warning(f"CHAT_ROUTE_PROCESSING: Skipping malformed dict item in LLM_MODELS config: {item}")
+            else:
+                logger.warning(f"CHAT_ROUTE_PROCESSING: Skipping item of unexpected type in LLM_MODELS config: {item}")
+    else:
+        logger.warning(f"CHAT_ROUTE_PROCESSING: LLM_MODELS config is not a list: {llm_models_config}")
+
+    raw_available_models_names = processed_ollama_names # This is the variable your existing logging and query use
+    logger.debug(f"Chat Route: Extracted raw_available_models_names (for DB query): {raw_available_models_names}")
+
+    # Filter these models based on database entries and user permissions
+    accessible_models_for_template = []
+    if current_user.is_authenticated and raw_available_models_names:
+        # Fetch Model objects from DB that are active and match the names from config
+        # We match based on ollama_model_name as that's what app.config['LLM_MODELS'] seems to store
+        logger.info(f"CHAT_ROUTE_DEBUG: Type of raw_available_models_names: {type(raw_available_models_names)}")
+        if isinstance(raw_available_models_names, list) and raw_available_models_names:
+            logger.info(f"CHAT_ROUTE_DEBUG: Type of first element in raw_available_models_names: {type(raw_available_models_names[0])}")
+            logger.info(f"CHAT_ROUTE_DEBUG: Content of raw_available_models_names: {raw_available_models_names}")
+        elif isinstance(raw_available_models_names, list):
+            logger.info(f"CHAT_ROUTE_DEBUG: raw_available_models_names is an empty list.")
+        else:
+            logger.info(f"CHAT_ROUTE_DEBUG: raw_available_models_names is not a list. Content: {raw_available_models_names}")
+
+        db_models_to_check = Model.query.filter(
+            Model.is_active==True,
+            Model.ollama_model_name.in_(raw_available_models_names)
+        ).all()
+        logger.debug(f"Chat Route: DB models to check (active and on server): {[m.ollama_model_name for m in db_models_to_check]}")
+
+        for model_obj in db_models_to_check:
+            if current_user.can_access_model(model_obj.id):
+                accessible_models_for_template.append({
+                    'id': model_obj.id, 
+                    'name': model_obj.display_name, 
+                    'ollama_model_name': model_obj.ollama_model_name, 
+                    'description': model_obj.description
+                })
+        logger.debug(f"Chat Route: Accessible models for template (after permission check, before fallback): {accessible_models_for_template}")
+    
+    # Ensure there's always at least one model if possible, or an empty list
+    # The 'name' field in this list is what the user sees in the dropdown.
+    # The 'ollama_model_name' is what's sent to the backend/LLM service.
+    if not accessible_models_for_template and DEFAULT_MODEL_NAME:
+        # Fallback to default model if user has access to it, or if no specific permissions are set for it (implicitly allowed)
+        # This part might need refinement based on how default model access is handled for users without explicit permissions
+        default_db_model = Model.query.filter_by(ollama_model_name=DEFAULT_MODEL_NAME, is_active=True).first()
+        if default_db_model and current_user.can_access_model(default_db_model.id):
+            available_models_for_template = [{
+                'id': default_db_model.id, 
+                'name': default_db_model.display_name, 
+                'ollama_model_name': default_db_model.ollama_model_name, 
+                'description': default_db_model.description
+            }]
+            logger.info(f"User {current_user.id} has no specific models, falling back to accessible default: {DEFAULT_MODEL_NAME}")
+        else:
+            available_models_for_template = [] # No accessible models
+            logger.warning(f"User {current_user.id} has no accessible models, including the default. Model selection will be empty.")
+    elif not accessible_models_for_template:
+        available_models_for_template = []
+        logger.warning(f"User {current_user.id} has no accessible models. Model selection will be empty.")
+    else:
+        available_models_for_template = accessible_models_for_template
+
+    # This 'available_models' will be passed to the template
+    # It's a list of dicts, e.g., [{'id':1, 'name':'GPT-4', 'ollama_model_name':'gpt-4'}, ...]
+    available_models = available_models_for_template 
+
+    # Create a set of ollama_model_names that are currently available and accessible to the user
+    accessible_ollama_model_names = {model_dict['ollama_model_name'] for model_dict in available_models if 'ollama_model_name' in model_dict}
+    logger.debug(f"Chat Route: Accessible ollama_model_names (set, after fallback logic): {accessible_ollama_model_names}")
+    logger.debug(f"Chat Route: Configured EFFECTIVE_DEFAULT_MODEL_NAME: {app.config.get('EFFECTIVE_DEFAULT_MODEL_NAME')}")
 
     if conversation_id:
         conversation = Conversation.query.filter_by(id=conversation_id, user_id=current_user.id).first_or_404()
-        # Ensure the conversation's selected model is still valid, fallback if not
-        if conversation.selected_model not in available_models:
-            logger.warning(f"Conversation {conversation.id} had model '{conversation.selected_model}' which is not available. Falling back to '{available_models[0]}'.")
-            conversation.selected_model = available_models[0]
-            db.session.commit()
-    else:
+        
+        model_needs_fallback = False
+        if not conversation.selected_model: # No model selected yet for this existing conversation
+            model_needs_fallback = True
+            logger.info(f"Conversation {conversation.id} has no model selected.")
+        elif conversation.selected_model not in accessible_ollama_model_names: # Selected model is no longer available/accessible
+            model_needs_fallback = True
+            logger.warning(f"Conversation {conversation.id} had model '{conversation.selected_model}' which is not available or accessible.")
+
+        if model_needs_fallback:
+            if available_models: # Check if there are any models to fall back to
+                fallback_model_dict = available_models[0]
+                new_model_name = fallback_model_dict.get('ollama_model_name')
+                conversation.selected_model = new_model_name
+                logger.info(f"Falling back/setting model for conversation {conversation.id} to '{new_model_name}'.")
+                db.session.add(conversation) # Mark for update
+            else: # No models available to fall back to
+                conversation.selected_model = None
+                logger.warning(f"No accessible models to fall back to for conversation {conversation.id}. Setting selected_model to None.")
+                db.session.add(conversation) # Mark for update
+    else: # No conversation_id, so it's a new session or fetching the latest conversation
         conversation = Conversation.query.filter_by(user_id=current_user.id).order_by(Conversation.created_at.desc()).first()
-        if not conversation:
-            # Use the first available model or the default
-            default_conv_model = available_models[0]
-            logger.info(f"Creating first conversation for user {current_user.id} with model '{default_conv_model}'")
+        if not conversation: # No existing conversations, create a new one
+            initial_model_name = None
+            if available_models:
+                default_conv_model_dict = available_models[0]
+                initial_model_name = default_conv_model_dict.get('ollama_model_name')
+                logger.info(f"Creating first conversation for user {current_user.id} with model '{initial_model_name}'.")
+            else: # No models available for a new conversation
+                logger.warning(f"Cannot create new conversation for user {current_user.id} as no models are accessible. Initial model will be None.")
+            
             conversation = Conversation(
                 user_id=current_user.id,
                 title="New Conversation",
-                selected_model=default_conv_model
+                selected_model=initial_model_name # Assign string or None
             )
             db.session.add(conversation)
-            db.session.commit()
-        # Fallback check for existing conversation without a valid model
-        elif conversation.selected_model not in available_models:
-             logger.warning(f"Latest conversation {conversation.id} had model '{conversation.selected_model}' which is not available. Falling back to '{available_models[0]}'.")
-             conversation.selected_model = available_models[0]
-             db.session.commit()
+        elif conversation: # Existing conversation fetched as latest
+            model_needs_fallback_for_latest = False
+            if not conversation.selected_model:
+                model_needs_fallback_for_latest = True
+                logger.info(f"Latest conversation {conversation.id} has no model selected.")
+            elif conversation.selected_model not in accessible_ollama_model_names:
+                model_needs_fallback_for_latest = True
+                logger.warning(f"Latest conversation {conversation.id} had model '{conversation.selected_model}' which is not available or accessible.")
+
+            if model_needs_fallback_for_latest:
+                if available_models:
+                    fallback_model_dict = available_models[0]
+                    new_model_name = fallback_model_dict.get('ollama_model_name')
+                    conversation.selected_model = new_model_name
+                    logger.info(f"Falling back/setting model for latest conversation {conversation.id} to '{new_model_name}'.")
+                    db.session.add(conversation)
+                else:
+                    conversation.selected_model = None
+                    logger.warning(f"No accessible models to fall back to for latest conversation {conversation.id}. Setting selected_model to None.")
+                    db.session.add(conversation)
 
 
     all_conversations = Conversation.query.filter_by(user_id=current_user.id).order_by(Conversation.created_at.desc()).all()
     messages = ChatMessage.query.filter_by(conversation_id=conversation.id).order_by(ChatMessage.created_at).all()
+
+    logger.debug(f"Chat Route: Final 'available_models' for template: {available_models}")
+    logger.debug(f"Chat Route: Final 'conversation.selected_model' for UI: {conversation.selected_model if conversation else 'No conversation object'}")
     
     # Pass the LLM service type to the template
     return render_template('chat.html', 
                           conversation=conversation, 
                           all_conversations=all_conversations,
                           messages=messages, 
-                          models=available_models,
-                          llm_service_type=llm_service_type) # Add this line
+                          models=available_models, # This is now the filtered list of model dicts
+                          llm_service_type=llm_service_type)
 
 @app.route('/conversation/new', methods=['POST'])
 @login_required
 def new_conversation():
-    available_models = app.config['LLM_MODELS']
-    # Get model from form, fallback to first available or default
-    selected_model = request.form.get('model', available_models[0])
-    
-    # Ensure the selected model is actually in the available list
-    if selected_model not in available_models:
-        logger.warning(f"Model '{selected_model}' requested for new conversation is not available. Falling back to '{available_models[0]}'.")
-        selected_model = available_models[0]
+    llm_models_config = app.config.get('LLM_MODELS', [])
+    processed_ollama_names = []
 
-    logger.info(f"Creating new conversation for user {current_user.id} with model '{selected_model}'")
+    if isinstance(llm_models_config, list):
+        for item in llm_models_config:
+            if isinstance(item, str):
+                processed_ollama_names.append(item)
+            elif isinstance(item, dict):
+                model_name = item.get('ollama_model_name')
+                if model_name and isinstance(model_name, str):
+                    processed_ollama_names.append(model_name)
+                else:
+                    logger.warning(f"NEW_CONV_PROCESSING: Skipping malformed dict item in LLM_MODELS config: {item}")
+            else:
+                logger.warning(f"NEW_CONV_PROCESSING: Skipping item of unexpected type in LLM_MODELS config: {item}")
+    else:
+        logger.warning(f"NEW_CONV_PROCESSING: LLM_MODELS config is not a list: {llm_models_config}")
+
+    if not processed_ollama_names:
+        logger.error("NEW_CONV: No models available (processed_ollama_names is empty). Cannot create new conversation.")
+        flash("Cannot start a new chat: No AI models are currently available or configured correctly.", "danger")
+        return redirect(url_for('chat'))
+
+    # Get model name string from form
+    form_model_name = request.form.get('model')
+    final_selected_model_name = None
+
+    if form_model_name and form_model_name in processed_ollama_names:
+        final_selected_model_name = form_model_name
+    else:
+        if form_model_name: # Model from form was provided but invalid or not in the processed list
+            logger.warning(f"NEW_CONV: Model '{form_model_name}' from form is not in available list {processed_ollama_names}. Falling back.")
+        else: # No model provided in form, also fall back
+            logger.info(f"NEW_CONV: No model provided in form. Falling back.")
+        
+        # Fallback to the first model in the processed (and validated) list
+        final_selected_model_name = processed_ollama_names[0]
+        logger.info(f"NEW_CONV: Using fallback model '{final_selected_model_name}'.")
+
+    logger.info(f"Creating new conversation for user {current_user.id} with model '{final_selected_model_name}'")
     conversation = Conversation(
         user_id=current_user.id,
         title="New Conversation", # Title can be set later based on first message
-        selected_model=selected_model
+        selected_model=final_selected_model_name # This is now guaranteed to be an ollama_model_name string
     )
     db.session.add(conversation)
     db.session.commit()
@@ -1415,6 +1809,617 @@ def test_ollama():
     return jsonify(results)
 
 # Main entry point
+def initialize_rbac_data():
+    logger.info("FUNC_INIT_RBAC: Entered initialize_rbac_data function.") # Cascade Temp Log
+    """
+    Initializes default roles and populates the Model table
+    from available Ollama models if they don't already exist.
+    Also assigns all found models to the 'admin' role.
+    """
+    with app.app_context():
+        logger.info("FUNC_INIT_RBAC: Attempting to process roles and models...") # Cascade Temp Log (was: Initializing RBAC data (roles and models)...)
+
+        # 1. Create default roles
+        default_roles_data = {
+            "admin": "Administrator with full access to all models and system settings.",
+            "user": "Standard user with access to a default set of models."
+        }
+        admin_role_obj = None
+        user_role_obj = None
+
+        for role_name, role_desc in default_roles_data.items():
+            role = Role.query.filter_by(name=role_name).first()
+            if not role:
+                role = Role(name=role_name, description=role_desc)
+                db.session.add(role)
+                logger.info(f"Created role: {role_name}")
+            if role_name == "admin":
+                admin_role_obj = role
+            elif role_name == "user":
+                user_role_obj = role
+        
+        try:
+            db.session.commit() # Commit roles first
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error committing roles: {e}", exc_info=True)
+            return # Cannot proceed without roles
+
+        if not admin_role_obj:
+            logger.error("Admin role could not be found or created. Cannot proceed.")
+            return
+
+        # 2. Create and assign 'Admin' role to the default admin user (admin@admin.com)
+        default_admin_email = "admin@admin.com"
+        admin_user_obj = User.query.filter_by(email=default_admin_email).first()
+        if not admin_user_obj:
+            logger.info(f"Default admin user '{default_admin_email}' not found. Creating new admin user.")
+            hashed_password = generate_password_hash("admin")
+            admin_user_obj = User(
+                username="admin",
+                email=default_admin_email,
+                firstname="admin",
+                lastname="admin",
+                password_hash=hashed_password,
+                confirmed=True, 
+                is_active=True
+            )
+            db.session.add(admin_user_obj)
+            try:
+                db.session.commit() # Commit new admin user first
+                logger.info(f"Successfully created default admin user '{default_admin_email}'.")
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Error creating default admin user '{default_admin_email}': {e}", exc_info=True)
+                # Don't return, try to proceed with other admin if configured
+        
+        # Ensure the default admin user is active if they exist
+        if admin_user_obj and not admin_user_obj.is_active:
+            logger.info(f"Ensuring default admin user '{default_admin_email}' is active.")
+            admin_user_obj.is_active = True
+            # Commit this change before proceeding with role assignment
+            try:
+                db.session.commit()
+                logger.info(f"Default admin user '{default_admin_email}' set to active.")
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Error setting default admin user '{default_admin_email}' to active: {e}", exc_info=True)
+
+        # Assign Admin role to the default admin user if they exist and don't have it
+        if admin_user_obj and admin_role_obj not in admin_user_obj.roles:
+            admin_user_obj.roles.append(admin_role_obj)
+            try:
+                db.session.commit()
+                logger.info(f"Assigned 'admin' role to default admin user '{default_admin_email}'.")
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Error assigning 'admin' role to default admin user '{default_admin_email}': {e}", exc_info=True)
+        elif admin_user_obj:
+            logger.info(f"Default admin user '{default_admin_email}' already has 'admin' role or was just created with it.")
+
+        # 3. Assign 'Admin' role to the admin user from .env (if different from default and exists)
+        admin_username_env = app.config.get('ADMIN_USERNAME')
+        if admin_username_env and admin_username_env != "admin": # Check if .env admin is set and different from default 'admin'
+            env_admin_user = User.query.filter_by(username=admin_username_env).first()
+            if env_admin_user:
+                if admin_role_obj not in env_admin_user.roles:
+                    env_admin_user.roles.append(admin_role_obj)
+                    try:
+                        db.session.commit()
+                        logger.info(f"Assigned 'admin' role to .env admin user '{admin_username_env}'.")
+                    except Exception as e:
+                        db.session.rollback()
+                        logger.error(f"Error assigning 'admin' role to .env admin user '{admin_username_env}': {e}", exc_info=True)
+                else:
+                    logger.info(f".env admin user '{admin_username_env}' already has 'admin' role.")
+            else:
+                logger.warning(f"Admin user '{admin_username_env}' specified in .env not found in database. Cannot assign 'admin' role.")
+        elif not admin_username_env:
+            logger.info("ADMIN_USERNAME not set in .env file. Skipping .env admin role assignment.")
+        elif admin_username_env == "admin":
+            logger.info("ADMIN_USERNAME in .env is 'admin', which is already handled as the default admin. Skipping redundant assignment.")
+
+        # 3. Populate Model table from MANAGED_OLLAMA_MODELS and assign to admin
+        logger.info("Processing managed models for Model table and admin assignment...")
+        
+        admin_models_assigned_this_run = [] # To track models assigned to admin in this run
+        llm_service_type = app.config.get('LLM_SERVICE_TYPE', 'ollama').lower()
+
+
+        if llm_service_type == 'ollama':
+            managed_ollama_models_from_config = app.config.get('MANAGED_OLLAMA_MODELS', [])
+            if not managed_ollama_models_from_config:
+                logger.warning("No managed Ollama models found in app.config (MANAGED_OLLAMA_MODELS is empty or not set). "
+                               "Model table population from this list will be skipped.")
+            
+            for ollama_model_name in managed_ollama_models_from_config:
+                model = Model.query.filter_by(ollama_model_name=ollama_model_name).first()
+                if not model:
+                    # Attempt to create a somewhat friendly display name
+                    display_parts = ollama_model_name.split(':')[0].replace('-', ' ').replace('_', ' ')
+                    display_name_generated = ' '.join(word.capitalize() for word in display_parts.split(' '))
+                    tag_suffix = ""
+                    if ':' in ollama_model_name:
+                        tag = ollama_model_name.split(':')[-1]
+                        if tag.lower() != 'latest':
+                             tag_suffix = f" ({tag.capitalize()})"
+                        # else: # For 'latest', no specific tag suffix or a generic one like "(Latest)"
+                             # tag_suffix = " (Latest)" # Optional: if you want to explicitly mark 'latest'
+                    final_display_name = display_name_generated + tag_suffix
+
+                    model = Model(
+                        display_name=final_display_name, # This is the user-facing name
+                        ollama_model_name=ollama_model_name, # This is for Ollama API
+                        description=f"Ollama model: {ollama_model_name}",
+                        is_active=True # Managed models are active by default
+                    )
+                    db.session.add(model)
+                    logger.info(f"Created new Model DB entry for managed model: {ollama_model_name} (Display: {final_display_name})")
+                    try:
+                        db.session.commit() # Commit each new model to get its ID for relationships
+                    except Exception as e:
+                        db.session.rollback()
+                        logger.error(f"Error committing new model {ollama_model_name}: {e}", exc_info=True)
+                        continue # Skip to next model
+                elif not model.is_active:
+                    logger.info(f"Model '{ollama_model_name}' found in DB but was inactive. Activating it as it's a managed model.")
+                    model.is_active = True
+                    # No immediate commit needed here, will be committed with role assignment or at the end of this section.
+
+                # Assign to admin role if not already assigned and model object exists
+                if admin_role_obj and model and model.id is not None: # Ensure model is committed or fetched with an ID
+                    if model not in admin_role_obj.models:
+                        admin_role_obj.models.append(model)
+                        admin_models_assigned_this_run.append(model.display_name)
+                        logger.info(f"Assigned model '{model.display_name}' to 'admin' role.")
+                elif not model:
+                    logger.warning(f"Skipped assigning model {ollama_model_name} to admin as model object was None (likely due to creation error).")
+        
+        elif llm_service_type == 'llamacpp':
+            logger.info("LLM service is LlamaCPP. Checking/creating DB entry for its default model.")
+            llamacpp_default_model_name = app.config.get('EFFECTIVE_DEFAULT_MODEL_NAME')
+            if llamacpp_default_model_name:
+                model = Model.query.filter_by(ollama_model_name=llamacpp_default_model_name).first()
+                if not model:
+                    model = Model(
+                        display_name=llamacpp_default_model_name, 
+                        ollama_model_name=llamacpp_default_model_name, # Using ollama_model_name field for identifier consistency
+                        description=f"LlamaCPP model: {llamacpp_default_model_name}",
+                        is_active=True
+                    )
+                    db.session.add(model)
+                    logger.info(f"Created new Model DB entry for LlamaCPP default model: {llamacpp_default_model_name}")
+                    try:
+                        db.session.commit() # Commit to get ID
+                    except Exception as e:
+                        db.session.rollback()
+                        logger.error(f"Error committing LlamaCPP default model {llamacpp_default_model_name} to DB: {e}", exc_info=True)
+                        model = None # Ensure model is None if commit failed
+                
+                if admin_role_obj and model and model.id is not None:
+                    if model not in admin_role_obj.models:
+                        admin_role_obj.models.append(model)
+                        admin_models_assigned_this_run.append(model.display_name) # CORRECTED HERE
+                        logger.info(f"Assigned LlamaCPP model '{model.display_name}' to 'admin' role.") # Also ensure log uses display_name
+            else:
+                logger.warning("LlamaCPP service type, but no EFFECTIVE_DEFAULT_MODEL_NAME found in app.config.")
+        else:
+            logger.info(f"LLM service type is '{llm_service_type}'. Model DB population from managed list is primarily for Ollama.")
+
+        if admin_models_assigned_this_run:
+            logger.info(f"Models assigned/confirmed for admin role in this initialization run: {', '.join(admin_models_assigned_this_run)}")
+
+        try:
+            db.session.commit() # Commit all changes (new models, model activations, role assignments)
+            logger.info("Committed all model and admin role assignment changes for initialize_rbac_data.")
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Final commit in initialize_rbac_data failed: {e}", exc_info=True)
+
+        logger.info("FUNC_INIT_RBAC: Exiting initialize_rbac_data function.") # Cascade Temp Logn managed/default models complete.")
+# ===========================
+@app.route('/admin/rbac')
+@login_required
+def admin_rbac_page():
+    if not current_user.has_role('admin'):
+        flash("You must be an administrator to access this page.", "danger")
+        return redirect(url_for('index'))
+    
+    if not current_user.can_access_page('admin_rbac_page'):
+        flash('You do not have permission to access this page.', 'danger')
+        return redirect(url_for('index'))
+
+    try:
+        all_users = User.query.all()
+        all_roles = Role.query.all()
+        all_models = Model.query.all()
+    except Exception as e:
+        logger.error(f"Error fetching data for RBAC page: {e}", exc_info=True)
+        flash("Error loading RBAC management page data.", "danger")
+        return redirect(url_for('index'))
+        
+    # Define application pages/resources for access management display
+    # In a more complex app, these might come from a config or be discovered
+    # Prepare current page permissions for the template
+    current_page_permissions = {}
+    for role in all_roles:
+        current_page_permissions[role.id] = {}
+        for page in MANAGED_PAGE_ENDPOINTS:
+            current_page_permissions[role.id][page['endpoint']] = role.has_page_access(page['endpoint'])
+
+    current_model_permissions = {}
+    for role in all_roles:
+        current_model_permissions[role.id] = {}
+        # Ensure all_models is a list of Model objects, not just names or IDs
+        # The admin_rbac_page already queries all_models = Model.query.all()
+        for model_obj in all_models: # Iterate through the fetched Model objects
+            current_model_permissions[role.id][model_obj.id] = role.has_model_access(model_obj.id)
+    
+    return render_template('admin_rbac.html', 
+                           users=all_users, 
+                           roles=all_roles, 
+                           models=all_models, 
+                           app_pages=MANAGED_PAGE_ENDPOINTS, 
+                           current_page_permissions=current_page_permissions,
+                           current_model_permissions=current_model_permissions)
+
+
+@app.route('/admin/permissions/page_access/update', methods=['POST'])
+@login_required
+def update_page_access_permissions():
+    if not current_user.has_role('admin'):
+        return jsonify({'success': False, 'message': 'You do not have permission to perform this action.'}), 403
+
+    try:
+        data = request.get_json()
+        permissions_to_set = data.get('permissions', []) # Expected: [{'role_id': X, 'page_endpoint': 'Y'}, ...]
+
+        # Clear existing permissions for all managed pages
+        # This is a simple approach; a more complex app might do more granular updates.
+        existing_managed_endpoints = [p['endpoint'] for p in MANAGED_PAGE_ENDPOINTS]
+        PagePermission.query.filter(PagePermission.page_endpoint.in_(existing_managed_endpoints)).delete(synchronize_session=False)
+        # Note: synchronize_session=False is used here. If issues arise, consider 'fetch' or individual deletes.
+
+        # Add new permissions
+        for perm_data in permissions_to_set:
+            role_id = perm_data.get('role_id')
+            page_endpoint = perm_data.get('page_endpoint')
+
+            if not role_id or not page_endpoint:
+                logger.warning(f"Skipping invalid permission data: {perm_data}")
+                continue
+            
+            role = Role.query.get(role_id)
+            if not role:
+                logger.warning(f"Role ID {role_id} not found while updating page permissions.")
+                continue
+            
+            # Ensure the page_endpoint is one of the known manageable endpoints
+            if page_endpoint not in existing_managed_endpoints:
+                logger.warning(f"Attempt to set permission for unmanaged page_endpoint '{page_endpoint}'. Skipping.")
+                continue
+
+            new_permission = PagePermission(role_id=role.id, page_endpoint=page_endpoint)
+            db.session.add(new_permission)
+        
+        db.session.commit()
+        logger.info(f"Page access permissions updated by user {current_user.id}.")
+        return jsonify({'success': True, 'message': 'Page access permissions updated successfully.'})
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating page access permissions: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'Failed to update page access permissions due to a server error.'}), 500
+
+
+@app.route('/admin/permissions/model_access/update', methods=['POST'])
+@login_required
+def update_model_access_permissions():
+    if not current_user.has_role('admin'):
+        return jsonify({'success': False, 'message': 'You do not have permission to perform this action.'}), 403
+
+    try:
+        data = request.get_json()
+        role_id = data.get('role_id')
+        model_ids_to_assign = data.get('model_ids', [])  # Expected: [1, 2, 3]
+
+        if role_id is None:
+            logger.warning("Role ID not provided in request to update_model_access_permissions.")
+            return jsonify({'success': False, 'message': 'Role ID is required.'}), 400
+
+        role = Role.query.get(role_id)
+        if not role:
+            logger.warning(f"Role ID {role_id} not found while updating model access permissions.")
+            return jsonify({'success': False, 'message': f'Role with ID {role_id} not found.'}), 404
+
+        # Fetch valid Model objects based on provided IDs
+        valid_models = []
+        if model_ids_to_assign:
+            valid_models = Model.query.filter(Model.id.in_(model_ids_to_assign)).all()
+            
+            # Log if some provided model IDs were not found, but proceed with valid ones
+            assigned_model_ids = {model.id for model in valid_models}
+            invalid_ids_provided = [mid for mid in model_ids_to_assign if mid not in assigned_model_ids]
+            if invalid_ids_provided:
+                logger.warning(f"Invalid or non-existent model IDs {invalid_ids_provided} provided for role '{role.name}' (ID: {role.id}). These will be ignored.")
+
+        # Update the role's associated models
+        # SQLAlchemy automatically handles the changes in the 'role_models' association table
+        role.models = valid_models
+        
+        db.session.commit()
+        logger.info(f"Model access permissions for role '{role.name}' (ID: {role.id}) updated by admin user {current_user.id}. Assigned model IDs: {[m.id for m in valid_models]}.")
+        return jsonify({'success': True, 'message': f'Model access permissions for role \'{role.name}\' updated successfully.'})
+
+    except Exception as e:
+        db.session.rollback()
+        # Try to get role_id from data if available for logging, otherwise use a placeholder
+        requested_role_id = data.get('role_id', 'N/A') if isinstance(data, dict) else 'N/A'
+        logger.error(f"Error updating model access permissions for role ID {requested_role_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'Failed to update model access permissions due to a server error.'}), 500
+
+
+
+@app.route('/admin/user/assign_roles/<int:user_id>', methods=['POST'])
+@login_required
+def assign_user_roles(user_id):
+    if not current_user.has_role('admin'):
+        return jsonify({'success': False, 'message': 'You do not have permission to perform this action.'}), 403
+
+    user = User.query.get_or_404(user_id)
+    # Ensure admin cannot unwittlingly remove their own admin role if they are the only admin
+    # or de-admin themselves via this mechanism if they are the user being edited.
+    if user.id == current_user.id:  # Check if the user being edited is the current admin
+        admin_role = Role.query.filter_by(name='admin').first()
+        # If the 'admin' role exists and its ID is NOT in the list of roles to be assigned to self
+        if admin_role and str(admin_role.id) not in request.form.getlist('role_ids[]'):
+            # Check if there are other admins in the system
+            other_admins = User.query.join(User.roles).filter(Role.name == 'admin', User.id != user.id).count()
+            if other_admins == 0:
+                return jsonify({'success': False, 'message': 'As the only administrator, you cannot remove your own admin role.'}), 400
+
+    role_ids = request.form.getlist('role_ids[]') # Assuming role_ids are sent as a list
+    
+    # logger.info(f"Assigning roles to user {user_id}: {role_ids}") # For debugging
+
+    # Clear existing roles
+    user.roles.clear()
+
+    # Add new roles
+    if role_ids:
+        for role_id_str in role_ids:
+            try:
+                role_id = int(role_id_str)
+                role = Role.query.get(role_id)
+                if role:
+                    user.roles.append(role)
+                else:
+                    logger.warning(f"Role ID {role_id} not found while assigning roles to user {user_id}.")
+            except ValueError:
+                logger.warning(f"Invalid role ID {role_id_str} received for user {user_id}.")
+                # Optionally, return an error here if strict validation is needed
+
+    try:
+        db.session.commit()
+        # Fetch the updated roles to send back for potential UI update
+        updated_role_names = [role.name for role in user.roles]
+        logger.info(f"Successfully updated roles for user {user.id} to: {updated_role_names}")
+        return jsonify({'success': True, 'message': 'User roles updated successfully.', 'user_id': user_id, 'new_roles': updated_role_names})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating roles for user {user_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'Failed to update roles due to a server error.'}), 500
+
+
+@app.route('/admin/roles/create', methods=['POST'])
+@login_required
+def create_role():
+    if not current_user.has_role('admin'):
+        flash("You do not have permission to perform this action.", "danger")
+        return redirect(url_for('admin_rbac_page'))
+
+    role_name = request.form.get('role_name')
+    role_description = request.form.get('role_description')
+
+    if not role_name:
+        flash('Role name is required.', 'warning')
+        return redirect(url_for('admin_rbac_page'))
+
+    existing_role = Role.query.filter_by(name=role_name).first()
+    if existing_role:
+        flash(f'Role "{role_name}" already exists.', 'warning')
+        return redirect(url_for('admin_rbac_page'))
+
+    try:
+        new_role = Role(name=role_name, description=role_description)
+        db.session.add(new_role)
+        db.session.commit()
+        flash(f'Role "{role_name}" created successfully.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating role '{role_name}': {e}", exc_info=True)
+        flash('Error creating role. Please check logs.', 'danger')
+
+    return redirect(url_for('admin_rbac_page'))
+
+
+@app.route('/admin/role/edit/<int:role_id>', methods=['GET'])
+@login_required
+def edit_role_page(role_id):
+    if not current_user.has_role('admin'):
+        flash("You do not have permission to perform this action.", "danger")
+        return redirect(url_for('admin_rbac_page'))
+    role = Role.query.get_or_404(role_id)
+    return render_template('edit_role.html', role=role)
+
+@app.route('/admin/role/edit/<int:role_id>', methods=['POST'])
+@login_required
+def edit_role_submit(role_id):
+    if not current_user.has_role('admin'):
+        flash("You do not have permission to perform this action.", "danger")
+        return redirect(url_for('admin_rbac_page'))
+
+    role = Role.query.get_or_404(role_id)
+    new_name = request.form.get('role_name')
+    new_description = request.form.get('role_description')
+
+    if not new_name:
+        flash('Role name is required.', 'warning')
+        return render_template('edit_role.html', role=role) # Stay on edit page with error
+
+    # Check if new name conflicts with an existing role (excluding the current role itself)
+    existing_role_with_new_name = Role.query.filter(Role.name == new_name, Role.id != role_id).first()
+    if existing_role_with_new_name:
+        flash(f'Role name "{new_name}" already exists. Please choose a different name.', 'warning')
+        return render_template('edit_role.html', role=role) # Stay on edit page with error
+
+    role.name = new_name
+    role.description = new_description
+
+    try:
+        db.session.commit()
+        flash(f'Role "{role.name}" updated successfully.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating role '{role.name}': {e}", exc_info=True)
+        flash('Error updating role. Please check logs.', 'danger')
+    
+    return redirect(url_for('admin_rbac_page'))
+
+
+@app.route('/admin/users/create', methods=['POST'])
+@login_required
+def create_user_from_admin():
+    if not current_user.has_role('admin'):
+        flash("You do not have permission to perform this action.", "danger")
+        return redirect(url_for('admin_rbac_page'))
+
+    username = request.form.get('username')
+    email = request.form.get('email')
+    password = request.form.get('password')
+
+    if not username or not email or not password:
+        flash('Username, email, and password are required.', 'warning')
+        return redirect(url_for('admin_rbac_page'))
+
+    if User.query.filter_by(username=username).first():
+        flash(f'Username "{username}" already exists.', 'warning')
+        return redirect(url_for('admin_rbac_page'))
+    
+    if User.query.filter_by(email=email).first():
+        flash(f'Email "{email}" already registered.', 'warning')
+        return redirect(url_for('admin_rbac_page'))
+
+    try:
+        new_user = User(username=username, email=email)
+        new_user.set_password(password)
+        new_user.confirmed = True  # Admins create confirmed users
+        # Optionally, assign a default role (e.g., 'user')
+        # user_role = Role.query.filter_by(name='user').first()
+        # if user_role:
+        #     new_user.roles.append(user_role)
+        
+        db.session.add(new_user)
+        db.session.commit()
+        flash(f'User "{username}" created successfully.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating user '{username}': {e}", exc_info=True)
+        flash('Error creating user. Please check logs.', 'danger')
+
+    return redirect(url_for('admin_rbac_page'))
+
+
+@app.route('/admin/user/toggle_active/<int:user_id>', methods=['POST'])
+@login_required
+def toggle_user_active(user_id):
+    logger.info(f"TOGGLE_USER_ACTIVE: current_user ID: {current_user.id}, Username: {current_user.username}, Email: {current_user.email}")
+    logger.info(f"TOGGLE_USER_ACTIVE: current_user roles: {[role.name for role in current_user.roles]}")
+    if not current_user.has_role('admin'):
+        return jsonify({'success': False, 'message': 'You do not have permission to perform this action.', 'user_id': user_id, 'new_status': None}), 403
+
+    user_to_toggle = User.query.get_or_404(user_id)
+
+    # Prevent admins from deactivating themselves if they are the only admin
+    if user_to_toggle.id == current_user.id and 'admin' in [role.name for role in user_to_toggle.roles]:
+        other_admins = User.query.join(User.roles).filter(Role.name == 'admin', User.id != user_to_toggle.id).count()
+        if other_admins == 0:
+            return jsonify({'success': False, 'message': 'As the only administrator, you cannot deactivate your own account.'}), 400
+
+    try:
+        user_to_toggle.is_active = not user_to_toggle.is_active
+        db.session.commit()
+        status_text = "activated" if user_to_toggle.is_active else "deactivated"
+        logger.info(f"User {user_to_toggle.username} has been {status_text}.")
+        return jsonify({'success': True, 'message': f'User {user_to_toggle.username} has been {status_text}.', 'is_active': user_to_toggle.is_active})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error toggling active status for user {user_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'An unexpected error occurred.', 'is_active': user_to_toggle.is_active if 'user_to_toggle' in locals() and hasattr(user_to_toggle, 'is_active') else None}), 500
+
+
+
+@app.route('/admin/user/update', methods=['POST'])
+@login_required
+def update_user_details():
+    logger.info(f"UPDATE_USER_DETAILS: current_user ID: {current_user.id}, Username: {current_user.username}")
+    if not current_user.has_role('admin'):
+        logger.warning(f"UPDATE_USER_DETAILS: Unauthorized attempt by user {current_user.id}")
+        return jsonify({'success': False, 'error': 'Unauthorized access attempt.'}), 403
+
+    data = request.get_json()
+    if not data:
+        logger.error("UPDATE_USER_DETAILS: No JSON data received.")
+        return jsonify({'success': False, 'error': 'No data received.'}), 400
+
+    user_id = data.get('user_id')
+    new_username = data.get('username', '').strip()
+    new_email = data.get('email', '').strip()
+
+    if not user_id or not isinstance(user_id, int):
+        logger.error(f"UPDATE_USER_DETAILS: Invalid or missing user_id: {user_id}")
+        return jsonify({'success': False, 'error': 'Invalid or missing user ID.'}), 400
+    
+    if not new_username:
+        logger.warning(f"UPDATE_USER_DETAILS: Username cannot be empty for user_id {user_id}.")
+        return jsonify({'success': False, 'error': 'Username cannot be empty.'}), 400
+
+    if not new_email:
+        logger.warning(f"UPDATE_USER_DETAILS: Email cannot be empty for user_id {user_id}.")
+        return jsonify({'success': False, 'error': 'Email cannot be empty.'}), 400
+
+    user_to_update = User.query.get(user_id)
+    if not user_to_update:
+        logger.error(f"UPDATE_USER_DETAILS: User with ID {user_id} not found.")
+        return jsonify({'success': False, 'error': 'User not found.'}), 404
+
+    # Check for username conflict (if changed and new username exists for another user)
+    if user_to_update.username != new_username:
+        existing_user_by_username = User.query.filter(User.id != user_id, User.username == new_username).first()
+        if existing_user_by_username:
+            logger.warning(f"UPDATE_USER_DETAILS: Username '{new_username}' already taken by user ID {existing_user_by_username.id}.")
+            return jsonify({'success': False, 'error': f'Username \"{new_username}\" is already taken.'}), 409
+
+    # Check for email conflict (if changed and new email exists for another user)
+    if user_to_update.email != new_email:
+        existing_user_by_email = User.query.filter(User.id != user_id, User.email == new_email).first()
+        if existing_user_by_email:
+            logger.warning(f"UPDATE_USER_DETAILS: Email '{new_email}' already registered to user ID {existing_user_by_email.id}.")
+            return jsonify({'success': False, 'error': f'Email \"{new_email}\" is already registered.'}), 409
+
+    try:
+        user_to_update.username = new_username
+        user_to_update.email = new_email
+        db.session.commit()
+        logger.info(f"UPDATE_USER_DETAILS: User {user_id} ({new_username}) updated successfully.")
+        return jsonify({'success': True, 'message': 'User details updated successfully.'})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"UPDATE_USER_DETAILS: Error updating user {user_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'An internal error occurred while updating the user.'}), 500
+
+
+
 if __name__ == '__main__':
     # Check dependencies
     system_deps = check_system_dependencies()
@@ -1430,9 +2435,11 @@ if __name__ == '__main__':
     # === Add a startup message showing the LLM service type ===
     logger.info(f"Starting AI Chat application with {llm_service_type.upper()} as the LLM service")
     
+    logger.info("MAIN: Attempting to enter app_context for db.create_all()...") # Cascade Temp Log
     with app.app_context():
-        # Ensure tables exist.
+        logger.info("MAIN: Inside app_context. Attempting db.create_all()...") # Cascade Temp Log
         db.create_all()
+        initialize_rbac_data() # Initialize roles and models
     
     # === Update app.run for Docker ===
     # Use host='0.0.0.0' to be accessible outside the container

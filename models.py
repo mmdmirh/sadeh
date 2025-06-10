@@ -23,6 +23,26 @@ class User(UserMixin, db.Model):
         from werkzeug.security import check_password_hash
         return check_password_hash(self.password_hash, password)
 
+    def is_admin(self):
+        """Check if the user has the 'admin' role."""
+        # Assumes 'self.roles' is populated (relationship defined in app.py).
+        # Assumes Role object has a 'name' attribute.
+        if not hasattr(self, 'roles') or not self.roles:
+            return False 
+        return any(hasattr(role, 'name') and role.name == 'admin' for role in self.roles)
+
+    def can_access_model(self, model_id):
+        """Check if the user can access a specific model by its ID."""
+        # Admins have access to all models.
+        if self.is_admin(): # is_admin already checks for self.roles
+            return True
+        
+        # Check if any of the user's roles grant access to the model.
+        # Assumes 'self.roles' is populated and Role object has 'has_model_access(model_id)' method.
+        if not hasattr(self, 'roles') or not self.roles:
+            return False
+        return any(hasattr(role, 'has_model_access') and role.has_model_access(model_id) for role in self.roles)
+
 class Conversation(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)

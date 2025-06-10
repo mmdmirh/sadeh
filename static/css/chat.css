@@ -63,6 +63,72 @@
     --radius-full: 9999px;
     
     /* Transitions */
+
+/* Error Message Styling */
+.message.error-message .message-bubble.error-bubble {
+    background-color: #FFF1F2; /* Softer red background */
+    border: 1px solid #FECACA;   /* Light red border */
+    color: #B91C1C;              /* Darker red text for contrast */
+    padding: var(--space-3);
+}
+
+.message.error-message .message-avatar.error-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px; 
+    height: 40px;
+    border-radius: var(--radius-full); 
+    background-color: #FEE2E2; 
+}
+
+.message.error-message .message-avatar.error-avatar svg {
+    color: var(--error, #EF4444); 
+    width: 20px;
+    height: 20px;
+}
+
+.error-content .error-summary {
+    font-weight: 500; 
+    margin-bottom: var(--space-2); 
+}
+
+.error-details-container {
+    margin-top: var(--space-2);
+}
+
+.error-details-toggle {
+    font-size: 0.875em; 
+    color: #7F1D1D; 
+    text-decoration: underline;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+}
+
+.error-details-toggle:hover {
+    color: #991B1B;
+}
+
+.error-details-content {
+    font-size: 0.8em; 
+    background-color: #FEE2E2; 
+    padding: var(--space-2);
+    border-radius: var(--radius-sm); 
+    margin-top: var(--space-1);
+    white-space: pre-wrap;       
+    word-break: break-all;       
+    color: #7F1D1D;
+    max-height: 150px; 
+    overflow-y: auto;
+    border: 1px solid #FECACA; 
+}
+
+.message.error-message .message-inner {
+    align-items: flex-start; 
+}
+
     --transition-fast: 150ms ease;
     --transition-normal: 250ms ease;
 }
@@ -284,6 +350,43 @@ body {
     background-color: var(--bg-white);
 }
 
+.chat-header .page-title {
+    flex-grow: 1; /* Allow title to take up available space */
+    margin-right: var(--space-4); /* Add some space before the model selector */
+    font-size: var(--font-size-lg); /* Adjust if needed */
+    /* Truncate title if it gets too long */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.model-toolbar-selector {
+    display: flex; /* Align label and select inline */
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.model-toolbar-selector label {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted); 
+    margin-bottom: 0; 
+}
+
+.model-toolbar-selector #model-select {
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--font-size-sm);
+    border: 1px solid var(--border-normal);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-white);
+    min-width: 150px; 
+    max-width: 250px; /* Prevent it from getting too wide */
+    color: var(--text-normal); /* Added for better text readability */
+}
+
+.chat-header .toggle-sidebar {
+    margin-right: var(--space-3); /* Ensure space between toggle and title */
+}
+
 .toggle-sidebar {
     display: none;
     border: none;
@@ -396,31 +499,51 @@ body {
 
 .message-inner {
     display: flex;
-    align-items: flex-start;
-    gap: var(--space-4);
+    align-items: flex-end; /* Align items to the bottom for better bubble appearance */
+    gap: var(--space-3); /* Reduced gap slightly */
 }
 
 .message-avatar {
-    width: 36px;
-    height: 36px;
+    width: 40px; 
+    height: 40px;
     flex-shrink: 0;
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    border-radius: var(--radius-full); 
+    overflow: hidden; 
 }
 
 .message-bubble {
-    flex: 1;
     padding: var(--space-3) var(--space-4);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-lg); /* Default, will be overridden */
     font-size: 15px;
+    max-width: 80%; /* Bubbles don't take full width if content is short */
+    word-wrap: break-word; /* Ensure long words break */
+    box-shadow: var(--shadow-sm);
+    /* Removed flex: 1; to allow max-width to work effectively */
+}
+
+.user-message .message-inner {
+    justify-content: flex-end; /* Aligns bubble and avatar to the right */
 }
 
 .user-message .message-bubble {
-    background-color: var(--primary-light);
-    color: var(--text-dark);
+    background-color: var(--user-bubble-bg, #10a37f);
+    color: var(--user-bubble-text, #ffffff);
+    /* Tail on the bottom-right of the bubble, as avatar is to its right */
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg); 
+}
+
+.ai-message .message-inner {
+    justify-content: flex-start; /* Default, but explicit */
 }
 
 .ai-message .message-bubble {
-    background-color: var(--secondary);
-    color: var(--text-normal);
+    background-color: var(--ai-bubble-bg, #f7f7f8);
+    color: var(--ai-bubble-text, #353740);
+    /* Tail on the bottom-left of the bubble, as avatar is to its left */
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm); 
 }
 
 .user-content,
@@ -679,6 +802,132 @@ body {
     box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3);
 }
 
+/* Error Message Styling */
+.message.error-message .message-avatar svg {
+    fill: var(--danger-dark, #B91C1C); /* Make error icon red */
+}
+
+.message.error-message .message-bubble,
+.error-bubble { 
+    background-color: var(--danger-light, #FEE2E2) !important; 
+    color: var(--danger-dark, #B91C1C) !important; 
+    border: 1px solid var(--danger-normal, #F87171);
+    /* border-radius: var(--radius-md) !important; */ /* Optional: less chat-like shape */
+}
+
+.error-content .error-summary {
+    font-weight: var(--font-semibold);
+    margin-bottom: var(--space-2);
+}
+
+.error-details-container {
+    margin-top: var(--space-3);
+}
+
+.error-details-toggle {
+    background-color: transparent;
+    color: var(--primary-dark, #4B5563); 
+    border: none;
+    padding: var(--space-1) 0;
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+}
+
+.error-details-toggle:hover {
+    color: var(--primary-darker, #1F2937); 
+}
+
+.error-details-content {
+    background-color: var(--bg-code, #F3F4F6);
+    color: var(--text-code, #1F2937);
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    margin-top: var(--space-1);
+    font-size: var(--font-size-xs);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Thinking Indicator Styling */
+.thinking-indicator span {
+    animation: thinking-dots 1.4s infinite;
+    opacity: 0;
+    font-weight: var(--font-bold);
+    font-size: 1.2em; /* Make dots a bit larger */
+}
+
+.thinking-indicator span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.thinking-indicator span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.thinking-indicator span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes thinking-dots {
+    0%, 80%, 100% {
+        opacity: 0;
+    }
+    40% {
+        opacity: 1;
+    }
+}
+
+.ai-message .message-bubble .ai-content .thinking-indicator {
+    display: inline-block; 
+    padding: 5px 0; 
+}
+
+/* Markdown Content Styling */
+.message-bubble .ai-content strong {
+    font-weight: var(--font-bold);
+}
+
+.message-bubble .ai-content em {
+    font-style: italic;
+}
+
+.message-bubble .ai-content pre {
+    background-color: var(--bg-code, #1F2937); /* Darker background for code blocks */
+    color: var(--text-code-alt, #D1D5DB); /* Lighter text for dark background */
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+    margin: var(--space-3) 0;
+    overflow-x: auto; /* Allow horizontal scrolling for long lines */
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    line-height: var(--leading-relaxed);
+    white-space: pre; /* Keep pre formatting but allow overflow-x */
+}
+
+.message-bubble .ai-content pre code {
+    font-family: inherit; /* Inherit from pre */
+    background-color: transparent; /* Code inside pre shouldn't have its own bg */
+    color: inherit; /* Inherit from pre */
+    padding: 0; /* No extra padding for code inside pre */
+    white-space: inherit; /* Inherit from pre */
+}
+
+/* Optional: Basic styling for inline code if we add it later `code` */
+/*
+.message-bubble .ai-content code:not(pre code) {
+    background-color: var(--bg-subtle);
+    color: var(--text-normal);
+    padding: 0.2em 0.4em;
+    margin: 0;
+    font-size: 85%;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+}
+*/
+
 .disclaimer {
     text-align: center;
     font-size: 12px;
@@ -734,8 +983,8 @@ body {
     }
     
     .message-avatar {
-        width: 30px;
-        height: 30px;
+        width: 36px;
+        height: 36px;
     }
     
     .message-bubble {
