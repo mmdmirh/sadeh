@@ -40,3 +40,7 @@ packages/
 
 # SQL temporary files
 *.sql~
+
+# RAG data and indexes
+rag_documents/
+rag_indexes/

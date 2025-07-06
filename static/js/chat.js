@@ -155,26 +155,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function toggleSendStop(showStop) {
     if (!sendButton) return;
+    // Always remove both listeners to be safe, then add the correct one.
+    sendButton.removeEventListener('click', sendMessage);
+    sendButton.removeEventListener('click', abortResponse);
+
     if (showStop) {
       sendButton.innerHTML = stopIconHTML;
+      sendButton.addEventListener('click', abortResponse);
       sendButton.title = "Stop generating";
-      sendButton.onclick = abortResponse;
-      sendButton.classList.add('stop-button'); 
-      sendButton.classList.remove('send-btn-active'); 
+      sendButton.classList.remove('send-btn-active');
     } else {
       sendButton.innerHTML = sendIconHTML;
+      sendButton.addEventListener('click', sendMessage);
       sendButton.title = "Send message";
-      sendButton.onclick = sendMessage;
-      sendButton.classList.remove('stop-button');
-      sendButton.classList.add('send-btn-active'); 
+      sendButton.classList.add('send-btn-active');
     }
   }
 
-  function abortResponse() {
+  function abortResponse(event) {
+    if (event) event.preventDefault();
     if (currentAbortController) {
       currentAbortController.abort(); // This will trigger catch in fetch or stop stream processing
     }
-    // finalize() will be called by the fetch catch or stream abortion logic
+    finalize();
   }
 
   function finalize() {
@@ -257,16 +260,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 30); // Animation speed
   }
   
-  async function sendMessage() {
-    if (isAiResponding || !promptInput) return;
+  async function sendMessage(event) {
+    if (event) event.preventDefault();
+    // Prevent sending if AI is already responding (now acts as a stop button)
+    if (isAiResponding) {
+      abortResponse(event); // Pass event to abort as well
+      return;
+    }
+
     const text = promptInput.value.trim();
     if (!text) return;
-    
+
     // Check if there's a conversation selected
     const conversationId = document.getElementById('conversation_id')?.value;
     if (!conversationId) {
-        // If no conversation is selected, show an error message
-        displayChatMessage('ai', 'Please create a new conversation first before sending messages.', true);
+        displayChatMessage('ai', 'No conversation is active. Please select one or start a new chat.', true, 'No conversation ID found.');
         return;
     }
 
@@ -297,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
     formData.append('conversation_id', conversationId);
     formData.append('prompt', text);
     if (modelSelect && modelSelect.value) {
-        formData.append('model_name', modelSelect.value);
+        formData.append('model', modelSelect.value);
     }
     const csrfTokenInput = document.getElementById('csrf_token');
     if (csrfTokenInput && csrfTokenInput.value) {
@@ -434,7 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (sendButton) {
-    sendButton.onclick = sendMessage; // Initial setup for send action
+    sendButton.addEventListener('click', sendMessage); // Use addEventListener
     sendButton.innerHTML = sendIconHTML; // Set initial icon
     sendButton.title = "Send message";
     // Add class if it's used for default send state styling

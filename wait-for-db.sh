@@ -18,11 +18,7 @@ cmd="$@"
 >&2 echo "User: $user"
 >&2 echo "Command: $cmd"
 
-# Install MySQL client if not present
-if ! command -v mysql &> /dev/null; then
-    >&2 echo "MySQL client not found, installing..."
-    apt-get update && apt-get install -y default-mysql-client
-fi
+# The mysql client is now installed via the Dockerfile, so this check is no longer needed.
 
 # Wait for MySQL to be available
 counter=0
@@ -60,5 +56,26 @@ if ! mysql -h "$host" -P "$port" -u"$user" -p"$password" -e 'SHOW DATABASES;'; t
     exit 1
 fi
 
->&2 echo "=== MySQL is ready. Starting application... ==="
+>&2 echo "=== MySQL is ready. Applying database migrations... ==="
+# First, generate any new migration scripts based on model changes
+flask db migrate -m "auto migration" || true
+
+# Then, apply all migrations to bring the schema up to date
+flask db upgrade
+
+# Finally, run our custom command to populate the DB with initial data
+flask init-db
+
+# Setup ChromaDB database
+>&2 echo "=== Setting up ChromaDB MySQL database... ==="
+python /app/scripts/setup_chroma_db.py
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+    >&2 echo "=== Failed to setup ChromaDB database. Continuing anyway... ==="
+else
+    >&2 echo "=== ChromaDB database setup complete ==="
+fi
+
+>&2 echo "=== Database setup complete. Starting application... ==="
+
 exec $cmd

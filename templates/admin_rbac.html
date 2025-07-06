@@ -90,6 +90,7 @@
     <div class="container">
         <h1>Access Control</h1>
         <a href="{{ url_for('chat') }}" class="btn btn-secondary mb-3 mt-2">Return to Chat</a>
+        <a href="{{ url_for('admin_rag_page') }}" class="btn btn-info mb-3 mt-2">RAG Management</a>
 
         <!-- Tabs Navigation -->
         <ul class="nav nav-tabs mt-3" id="rbacTabs" role="tablist">
@@ -318,14 +319,33 @@
             <div class="card-body">
                 <p>Assign which AI models each role can access. Changes are saved per role when you click the 'Save for Role' button.</p>
                 {% if roles and models %}
-                    <table class="table table-striped table-bordered">
+                    <!-- Global Save Button -->
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="mb-0">Model Access by Role</h5>
+                        <button id="save-all-model-permissions" class="btn btn-primary" disabled>
+                            <i class="fas fa-save mr-1"></i> Save All Changes
+                            <span id="unsaved-count" class="badge badge-light ml-1" style="display:none;">0</span>
+                        </button>
+                    </div>
+
+                    <!-- Status Message Container -->
+                    <div id="model-permissions-message" class="mb-3"></div>
+
+                    <table class="table table-striped table-responsive" id="model-permissions-table">
                         <thead>
                             <tr>
                                 <th>Role</th>
                                 {% for model in models %}
-                                    <th class="text-center" title="{{ model.description or model.ollama_model_name }}">{{ model.display_name }}</th>
+                                <th class="text-center">
+                                    <div>{{ model.display_name }}</div>
+                                    {% if model.is_rag_model %}
+                                    <div class="d-flex justify-content-center align-items-center">
+                                        <span class="badge badge-info mr-1">RAG</span>
+                                    </div>
+                                    {% endif %}
+                                </th>
                                 {% endfor %}
-                                <th>Actions</th>
+                                <th>Status</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -344,18 +364,15 @@
                                                        data-model-id="{{ model.id }}"
                                                        name="model_access_role_{{ role.id }}"
                                                        value="{{ model.id }}"
-                                                       {% if current_model_permissions[role.id][model.id] %}checked{% endif %}
-                                                       {% if role.name == 'admin' %}disabled title="Admin role always has access to all models." aria-label="Admin model access for {{model.display_name}}"{% else %}aria-label="Model access for {{role.name}} to {{model.display_name}}"{% endif %}>
+                                                       {% if role.name == 'admin' or current_model_permissions[role.id][model.id] %}checked{% endif %}
+                                                       title="{% if role.name == 'admin' %}Admin model access for {{model.display_name}}{% else %}Model access for {{role.name}} to {{model.display_name}}{% endif %}" 
+                                                       aria-label="{% if role.name == 'admin' %}Admin model access for {{model.display_name}}{% else %}Model access for {{role.name}} to {{model.display_name}}{% endif %}">
                                                 <span class="slider"></span>
                                             </label>
                                         </td>
                                     {% endfor %}
                                     <td>
-                                        <button class="btn btn-sm btn-primary save-model-permissions-for-role-btn" 
-                                                data-role-id="{{ role.id }}"
-                                                {% if role.name == 'admin' %}disabled title="Admin model permissions cannot be changed." aria-label="Save model permissions for admin role (disabled)"{% else %}aria-label="Save model permissions for {{role.name}} role"{% endif %}>
-                                            Save for {{ role.name }}
-                                        </button>
+                                        <span id="role-status-{{ role.id }}" class="badge badge-secondary">No Changes</span>
                                     </td>
                                 </tr>
                             {% endfor %}
@@ -374,17 +391,34 @@
         <div class="card mb-4">
             <div class="card-header">
                 <h2 class="mt-2 mb-2 display-4">Available Models</h2>
+                <!-- Message container for displaying alerts -->
+                <div id="available-models-message"></div>
             </div>
             <div class="card-body">
                 {% if models %}
                     <ul class="list-group">
                         {% for model in models %}
                             <li class="list-group-item">
-                                <span>{{ model.display_name }}</span> (<code>{{ model.ollama_model_name }}</code>)
-                                <br>
-                                Description: {{ model.description | default('N/A') }}
-                                <br>
-                                Status: {% if model.is_active %}<span class="badge badge-primary">Active</span>{% else %}<span class="badge badge-warning">Inactive</span>{% endif %}
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <span>{{ model.display_name }}</span> (<code>{{ model.ollama_model_name }}</code>)
+                                        {% if model.is_rag_model %}<span class="badge badge-success ml-2">RAG-Enhanced</span>{% endif %}
+                                        <br>
+                                        Description: {{ model.description | default('N/A') }}
+                                        <br>
+                                        Status: {% if model.is_active %}<span class="badge badge-primary">Active</span>{% else %}<span class="badge badge-warning">Inactive</span>{% endif %}
+                                        {% if model.is_rag_model %}
+                                        <br>
+                                        <small class="text-muted">Base model: {{ model.base_rag_model_for.display_name if model.base_rag_model_for else 'Unknown' }}</small>
+                                        {% endif %}
+                                    </div>
+                                    {% if model.is_rag_model %}
+                                    <div>
+                                        <button type="button" class="btn btn-sm btn-outline-danger delete-rag-model-btn" data-model-id="{{ model.id }}" data-model-name="{{ model.display_name }}" title="Delete RAG Model">
+                                            <i class="fas fa-trash-alt"></i> Delete RAG Model
+                                        </button>
+                                    </div>
+                                    {% endif %}
                             </li>
                         {% endfor %}
                     </ul>
@@ -398,7 +432,7 @@
     </div>
 
     <!-- Optional: Link to Bootstrap JS and dependencies -->
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 <script>
@@ -558,7 +592,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             });
 
-            fetch("{{ url_for('update_page_access_permissions') }}", {
+            fetch("/admin/permissions/page_access/update", {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -640,7 +674,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 this.disabled = true;
                 this.innerHTML = 'Saving...';
 
-                fetch("{{ url_for('update_model_access_permissions') }}", {
+                fetch("/admin/permissions/model_access/update", {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -687,7 +721,210 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     // --- End Handle Model Access Permissions ---
 
-        initializeModelAccessEventHandlers(); // Initialize event handlers for model access
+    // --- Unified Model Permissions Save System ---
+    function initializeUnifiedSaveSystem() {
+        // Track permission changes across all roles
+        const permissionChanges = {};
+        const initialState = {};
+        const saveAllButton = document.getElementById('save-all-model-permissions');
+        const messageContainer = document.getElementById('model-permissions-message');
+
+        if (!saveAllButton) return;
+
+        // Store initial state of all checkboxes
+        document.querySelectorAll('.model-access-checkbox').forEach(checkbox => {
+            const roleId = checkbox.dataset.roleId;
+            const modelId = checkbox.dataset.modelId;
+            const isChecked = checkbox.checked;
+            
+            // Initialize role in initial state if it doesn't exist
+            if (!initialState[roleId]) {
+                initialState[roleId] = {
+                    models: {}
+                };
+            }
+            
+            // Store initial state
+            initialState[roleId].models[modelId] = isChecked;
+        });
+
+        // Listen for changes on all model permission toggles
+        document.querySelectorAll('.model-access-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const roleId = this.dataset.roleId;
+                const modelId = this.dataset.modelId;
+                const isChecked = this.checked;
+                const roleName = this.closest('tr').querySelector('td:first-child strong').textContent;
+                
+                // Initialize role in changes object if it doesn't exist
+                if (!permissionChanges[roleId]) {
+                    permissionChanges[roleId] = {
+                        name: roleName,
+                        models: {}
+                    };
+                }
+                
+                // Compare with initial state
+                const initialValue = initialState[roleId]?.models[modelId];
+                
+                if (isChecked === initialValue) {
+                    // If returned to initial state, remove from changes
+                    delete permissionChanges[roleId].models[modelId];
+                    if (Object.keys(permissionChanges[roleId].models).length === 0) {
+                        delete permissionChanges[roleId];
+                    }
+                } else {
+                    // Only track if different from initial state
+                    permissionChanges[roleId].models[modelId] = isChecked;
+                }
+                
+                // Update the role status badge
+                updateRoleStatus(roleId, permissionChanges);
+                
+                // Enable save button and update count
+                updateSaveButton(permissionChanges);
+            });
+        });
+        
+        // Function to update individual role status badges
+        function updateRoleStatus(roleId, changes) {
+            const statusBadge = document.getElementById(`role-status-${roleId}`);
+            if (!statusBadge) return;
+            
+            // Add null check for changes[roleId]
+            const modelChanges = changes[roleId] && Object.keys(changes[roleId].models || {}).length;
+            
+            if (modelChanges && modelChanges > 0) {
+                statusBadge.className = 'badge badge-warning';
+                statusBadge.textContent = `${modelChanges} Change${modelChanges > 1 ? 's' : ''}`;
+            } else {
+                statusBadge.className = 'badge badge-secondary';
+                statusBadge.textContent = 'No Changes';
+            }
+        }
+        
+        // Function to update the global save button
+        function updateSaveButton(changes) {
+            const totalChanges = Object.values(changes).reduce((total, role) => {
+                return total + Object.keys(role.models).length;
+            }, 0);
+            
+            const countBadge = document.getElementById('unsaved-count');
+            
+            if (totalChanges > 0) {
+                if (saveAllButton) saveAllButton.disabled = false;
+                if (countBadge) {
+                    countBadge.textContent = totalChanges;
+                    countBadge.style.display = 'inline-block';
+                }
+            } else {
+                if (saveAllButton) saveAllButton.disabled = true;
+                if (countBadge) countBadge.style.display = 'none';
+            }
+        }
+        
+        // Handle the global save button click
+        saveAllButton.addEventListener('click', function() {
+            // Prepare data for submission
+            const submitData = {};
+            
+            for (const roleId in permissionChanges) {
+                if (Object.keys(permissionChanges[roleId].models).length === 0) continue;
+                
+                // Get all checked model IDs for this role (including ones that weren't changed)
+                const checkedModelIds = [];
+                document.querySelectorAll(`.model-access-checkbox[data-role-id="${roleId}"]:checked`).forEach(box => {
+                    checkedModelIds.push(parseInt(box.dataset.modelId));
+                });
+                
+                submitData[roleId] = {
+                    model_ids: checkedModelIds
+                };
+            }
+            
+            // Display saving state
+            const originalText = this.innerHTML;
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+            
+            // Clear any existing messages
+            messageContainer.innerHTML = '';
+            
+            // Send the data to the server
+            fetch("/admin/permissions/model_access/update_batch", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken()
+                },
+                body: JSON.stringify(submitData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(errData => {
+                        throw Object.assign(new Error(errData.message || 'Server error'), errData);
+                    }).catch(() => {
+                        throw new Error('Network response was not ok: ' + response.statusText);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    // Show success message
+                    messageContainer.innerHTML = `<div class="alert alert-success alert-dismissible fade show" role="alert">
+                                                ${data.message || 'Model permissions updated successfully!'}
+                                                <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                                              </div>`;
+                    
+                    // Reset initial state to current state
+                    document.querySelectorAll('.model-access-checkbox').forEach(checkbox => {
+                        const roleId = checkbox.dataset.roleId;
+                        const modelId = checkbox.dataset.modelId;
+                        const isChecked = checkbox.checked;
+                        
+                        // Update initial state to reflect new state
+                        if (!initialState[roleId]) {
+                            initialState[roleId] = { models: {} };
+                        }
+                        initialState[roleId].models[modelId] = isChecked;
+                    });
+                    
+                    // Clear tracked changes
+                    for (const roleId in permissionChanges) {
+                        delete permissionChanges[roleId];
+                        updateRoleStatus(roleId, permissionChanges);
+                    }
+                    
+                    // Update save button
+                    updateSaveButton(permissionChanges);
+                } else {
+                    // Show error message
+                    messageContainer.innerHTML = `<div class="alert alert-danger alert-dismissible fade show" role="alert">
+                                                ${data.message || 'Failed to update model permissions.'}
+                                                <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                                              </div>`;
+                }
+            })
+            .catch(error => {
+                // Show error message
+                messageContainer.innerHTML = `<div class="alert alert-danger alert-dismissible fade show" role="alert">
+                                            Error updating model permissions: ${error.message || 'An unexpected error occurred.'}
+                                            <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                                          </div>`;
+                console.error('Error updating model access permissions:', error);
+            })
+            .finally(() => {
+                // Reset button state
+                this.disabled = false;
+                this.innerHTML = originalText;
+            });
+        });
+    }
+
+    // Initialize all handlers
+    initializeModelAccessEventHandlers(); // Initialize old event handlers for model access (will replace this later)
+    initializeUnifiedSaveSystem(); // Initialize the new unified save system
 
         // Initialize Select2 for role assignment
         $('.assign-roles-form select[name="role_ids[]"]').each(function() {
@@ -699,110 +936,248 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
 
-        // Handle Edit User button click to populate modal
-        $('.edit-user-btn').on('click', function() {
-            var userId = $(this).data('user-id');
-            var username = $(this).data('username');
-            var email = $(this).data('email');
+</script>
 
-            $('#editUserModal #editUserId').val(userId);
-            $('#editUserModal #editUsername').val(username);
-            $('#editUserModal #editEmail').val(email);
-        });
+<script>
+    // Wait for the DOM to be fully loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- Vanilla JS for elements that should be responsive immediately ---
+        
 
-        // Handle Save User Changes button click
-        $('#saveUserChangesBtn').on('click', function() {
-            var userId = $('#editUserId').val();
-            var username = $('#editUsername').val().trim();
-            var email = $('#editEmail').val().trim();
+        // User Active/Inactive Toggle with optimistic update
+        const toggleSwitches = document.querySelectorAll('.user-active-toggle');
+        toggleSwitches.forEach(switchElement => {
+            switchElement.addEventListener('change', function () {
+                const userId = this.dataset.userId;
+                const url = this.dataset.toggleUrl;
+                const isCheckedInitially = this.checked;
+                const statusTextElement = document.getElementById('user-status-text-' + userId);
 
-            if (!username || !email) {
-                alert('Username and Email cannot be empty.');
-                return;
-            }
-
-            // Basic email validation (very simple)
-            if (email.indexOf('@') === -1) {
-                alert('Please enter a valid email address.');
-                return;
-            }
-
-            $.ajax({
-                url: '/admin/user/update',
-                type: 'POST',
-                contentType: 'application/json',
-                headers: {
-                    'X-CSRFToken': getCsrfToken()
-                },
-                data: JSON.stringify({ 
-                    user_id: userId, 
-                    username: username, 
-                    email: email 
-                }),
-                success: function(response) {
-                    if (response.success) {
-                        // Update the user's information in the list
-                        var userRow = $('.edit-user-btn[data-user-id="' + userId + '"]').closest('li');
-                        userRow.find('span:first').text(username + ' (' + email + ')'); // Assumes username (email) format
-                        
-                        // Update data attributes on the edit button for next time
-                        $('.edit-user-btn[data-user-id="' + userId + '"]').data('username', username);
-                        $('.edit-user-btn[data-user-id="' + userId + '"]').data('email', email);
-
-                        $('#editUserModal').modal('hide');
-                        alert(response.message || 'User updated successfully!');
-                    } else {
-                        alert('Error: ' + (response.error || 'Could not update user.'));
-                    }
-                },
-                error: function(xhr) {
-                    alert('An error occurred: ' + xhr.status + ' ' + xhr.statusText);
+                // Optimistically update UI
+                if (statusTextElement) {
+                    statusTextElement.textContent = this.checked ? 'Active' : 'Inactive';
+                    statusTextElement.className = this.checked ? 'badge badge-success' : 'badge badge-secondary';
                 }
+
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    },
+                    body: JSON.stringify({ is_active: this.checked })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) {
+                        // Revert UI on failure
+                        this.checked = !isCheckedInitially;
+                        if (statusTextElement) {
+                            statusTextElement.textContent = !isCheckedInitially ? 'Active' : 'Inactive';
+                            statusTextElement.className = !isCheckedInitially ? 'badge badge-success' : 'badge badge-secondary';
+                        }
+                        toastr.error(data.message || 'Failed to update user status.');
+                        console.error('Failed to update user status:', data.message);
+                    }
+                })
+                .catch(error => {
+                    // Revert UI on network or other errors
+                    this.checked = !isCheckedInitially;
+                    if (statusTextElement) {
+                        statusTextElement.textContent = !isCheckedInitially ? 'Active' : 'Inactive';
+                        statusTextElement.className = !isCheckedInitially ? 'badge badge-success' : 'badge badge-secondary';
+                    }
+                    toastr.error('An unexpected error occurred. Please try again.');
+                    console.error('Error toggling user status:', error);
+                });
             });
         });
 
-    // Bootstrap validation for create user form (from original template)
-    // This part remains unchanged
-    var formsToValidate = document.querySelectorAll('.needs-validation');
-    Array.prototype.slice.call(formsToValidate)
-        .forEach(function (form) {
-            form.addEventListener('submit', function (event) {
-                if (!form.checkValidity()) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-                form.classList.add('was-validated');
-            }, false);
-        });
+        // --- jQuery-based scripts ---
+        $(document).ready(function() {
 
-        // Configure Toastr
-        toastr.options = {
-            "closeButton": true,
-            "debug": false,
-            "newestOnTop": true,
-            "progressBar": true,
-            "positionClass": "toast-top-right",
-            "preventDuplicates": false,
-            "onclick": null,
-            "showDuration": "300",
-            "hideDuration": "1000",
-            "timeOut": "5000",
-            "extendedTimeOut": "1000",
-            "showEasing": "swing",
-            "hideEasing": "linear",
-            "showMethod": "fadeIn",
-            "hideMethod": "fadeOut"
-        };
+            // --- Initializations ---
+
+            // Bootstrap validation for create user form
+            var formsToValidate = document.querySelectorAll('.needs-validation');
+            Array.prototype.slice.call(formsToValidate)
+                .forEach(function (form) {
+                    form.addEventListener('submit', function (event) {
+                        if (!form.checkValidity()) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }
+                        form.classList.add('was-validated');
+                    }, false);
+                });
+
+            // Configure Toastr for notifications
+            toastr.options = {
+                "closeButton": true, "debug": false, "newestOnTop": true, "progressBar": true,
+                "positionClass": "toast-top-right", "preventDuplicates": false, "onclick": null,
+                "showDuration": "300", "hideDuration": "1000", "timeOut": "5000",
+                "extendedTimeOut": "1000", "showEasing": "swing", "hideEasing": "linear",
+                "showMethod": "fadeIn", "hideMethod": "fadeOut"
+            };
+
+            // Initialize Select2 for role assignment in user management
+            $('.assign-roles-form select[name="role_ids[]"]').each(function() {
+                $(this).select2({
+                    theme: 'bootstrap4',
+                    placeholder: 'Select roles',
+                    allowClear: true,
+                    width: '100%'
+                });
+            });
+
+            // --- Event Handlers ---
+
+            // 1. RAG Model Deletion
+            $(document).on('click', '.delete-rag-model-btn', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const modelId = $(this).data('model-id');
+                const modelName = $(this).data('model-name');
+                const $listItem = $(this).closest('li.list-group-item');
+                
+                if (confirm(`Are you sure you want to delete the RAG model \"${modelName}\"? This action cannot be undone.`)) {
+                    const $btn = $(this);
+                    $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+                    
+                    $.ajax({
+                        url: "/admin/rag/delete_model",
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ model_id: modelId }),
+                        headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+                        success: function(response) {
+                            if (response.success) {
+                                toastr.success(response.message);
+                                $listItem.fadeOut(400, function() { $(this).remove(); });
+                                
+                                // Also remove the corresponding column from the permissions table
+                                const $tableHeader = $(`#model-permissions table th[data-model-id="${modelId}"]`);
+                                if ($tableHeader.length) {
+                                    const columnIndex = $tableHeader.index();
+                                    $('#model-permissions table tr').each(function() {
+                                        $(this).find('td, th').eq(columnIndex).remove();
+                                    });
+                                }
+                            } else {
+                                toastr.error(response.message || 'An unknown error occurred.');
+                                $btn.prop('disabled', false).html('<i class="fas fa-trash-alt"></i>');
+                            }
+                        },
+                        error: function(xhr) {
+                            const errorMsg = (xhr.responseJSON && xhr.responseJSON.message) ? xhr.responseJSON.message : 'Failed to delete RAG model.';
+                            toastr.error(errorMsg);
+                            $btn.prop('disabled', false).html('<i class="fas fa-trash-alt"></i>');
+                            console.error('Error deleting RAG model:', xhr.responseText);
+                        }
+                    });
+                }
+            });
+
+            // 2. Edit User Modal Population
+            $('.edit-user-btn').on('click', function() {
+                var userId = $(this).data('user-id');
+                var username = $(this).data('username');
+                var email = $(this).data('email');
+                $('#editUserModal #editUserId').val(userId);
+                $('#editUserModal #editUsername').val(username);
+                $('#editUserModal #editEmail').val(email);
+            });
+
+            // 3. Save User Changes (from modal)
+            $('#saveUserChangesBtn').on('click', function() {
+                var userId = $('#editUserId').val();
+                var username = $('#editUsername').val();
+                var email = $('#editEmail').val();
+                var updateUserUrl = "/admin/users/" + userId + "/update";
+
+                $.ajax({
+                    url: updateUserUrl,
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ username: username, email: email }),
+                    headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+                    success: function(response) {
+                        if (response.success) {
+                            toastr.success(response.message || 'User updated successfully!');
+                            $('#editUserModal').modal('hide');
+                            // Instead of full reload, just update the text on the page
+                            const userRow = $(`tr[data-user-id="${userId}"]`);
+                            userRow.find('td').eq(1).text(username);
+                            userRow.find('td').eq(2).text(email);
+                            // Also update the data attributes on the edit button
+                            const editBtn = userRow.find('.edit-user-btn');
+                            editBtn.data('username', username);
+                            editBtn.data('email', email);
+                        } else {
+                            toastr.error(response.message || 'Could not update user.');
+                        }
+                    },
+                    error: function(xhr) {
+                        const errorMsg = (xhr.responseJSON && xhr.responseJSON.message) ? xhr.responseJSON.message : 'An error occurred.';
+                        toastr.error(errorMsg);
+                    }
+                });
+            });
+
+            // 4. Model Access Permissions
+            // Enable save button when a checkbox is changed
+            $('.model-permission-checkbox').on('change', function() {
+                const roleId = $(this).closest('tr').data('role-id');
+                $(`.save-role-permissions-btn[data-role-id='${roleId}']`).prop('disabled', false);
+            });
+
+            // Handle save button click
+            $('.save-role-permissions-btn').on('click', function() {
+                const roleId = $(this).data('role-id');
+                const $btn = $(this);
+                const $row = $(`tr[data-role-id='${roleId}']`);
+                let assignedModelIds = [];
+                
+                $row.find('.model-permission-checkbox:checked').each(function() {
+                    assignedModelIds.push($(this).data('model-id'));
+                });
+
+                $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+
+                $.ajax({
+                    url: "/admin/permissions/model_access/update",
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ role_id: roleId, model_ids: assignedModelIds }),
+                    headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+                    success: function(response) {
+                        if (response.success) {
+                            toastr.success(`Permissions for role '${response.role_name}' updated.`);
+                        } else {
+                            toastr.error(response.message || 'Failed to update permissions.');
+                            // Re-enable button on failure so user can retry
+                            $btn.prop('disabled', false); 
+                        }
+                    },
+                    error: function(xhr) {
+                        const errorMsg = (xhr.responseJSON && xhr.responseJSON.message) ? xhr.responseJSON.message : 'An error occurred.';
+                        toastr.error(errorMsg);
+                        $btn.prop('disabled', false); // Re-enable on error
+                    },
+                    complete: function() {
+                        // Restore button text, but keep it disabled on success
+                        if ($btn.find('.fa-spinner').length > 0) {
+                             $btn.html('Save');
+                        }
+                    }
+                });
+            });
+        });
     });
 </script>
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
 
-
-<!-- Edit User Modal -->
+    <!-- Edit User Modal -->
     <div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -835,5 +1210,7 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
     <!-- End Edit User Modal -->
 
+    });
+    </script>
 </body>
 </html>

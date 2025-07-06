@@ -134,7 +134,7 @@ class OllamaService:
         
         if not stream:
             try:
-                response = requests.post(api_url, json=payload, timeout=30)
+                response = requests.post(api_url, json=payload, timeout=120)
                 if response.status_code != 200:
                     logger.error(f"Ollama API error: {response.status_code} - {response.text}")
                     raise Exception(f"Ollama API returned status {response.status_code}: {response.text}")
@@ -204,7 +204,7 @@ class OllamaService:
             import requests
             logger.info(f"Making streaming request to {api_url}")
             
-            response = requests.post(api_url, json=payload, stream=True, timeout=30)
+            response = requests.post(api_url, json=payload, stream=True, timeout=120)
             
             if response.status_code != 200:
                 error_msg = f"Ollama API returned error {response.status_code}: {response.text}"

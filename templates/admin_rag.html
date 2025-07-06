@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>RAG Management</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
+    <style>
+        body { padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container mt-4" id="rag-admin-data" data-documents='{{ documents_json|safe }}'>
+        <h1>RAG Management</h1>
+        <a href="{{ url_for('admin_rbac_page') }}" class="btn btn-secondary mb-3 mt-2">Return to Access Control</a>
+
+        <!-- Tabs Navigation -->
+        <ul class="nav nav-tabs mt-3" id="ragTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <a class="nav-link active" id="indexes-tab" data-toggle="tab" href="#indexes" role="tab" aria-controls="indexes" aria-selected="true">RAG Indexes</a>
+            </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link" id="documents-tab" data-toggle="tab" href="#documents" role="tab" aria-controls="documents" aria-selected="false">RAG Documents</a>
+            </li>
+        </ul>
+
+        <!-- Tabs Content -->
+        <div class="tab-content pt-3" id="ragTabsContent">
+            <!-- RAG Indexes Tab -->
+            <div class="tab-pane fade show active" id="indexes" role="tabpanel" aria-labelledby="indexes-tab">
+                <h2>Manage RAG Indexes</h2>
+                <!-- Create RAG Index Form -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3 class="mb-0">Create New RAG Index</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('create_rag_index') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="form-group">
+                                <label for="name">Index Name</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="base_model_id">Base LLM Model</label>
+                                <select class="form-control" id="base_model_id" name="base_model_id" required>
+                                    <option value="" disabled selected>Select a base model</option>
+                                    {% for model in base_models %}
+                                        <option value="{{ model.id }}">{{ model.display_name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="embedding_model_name">Embedding Model</label>
+                                <select class="form-control" id="embedding_model_name" name="embedding_model_name" required>
+                                    <option value="" disabled selected>Select an embedding model</option>
+                                    {% for model in available_embedding_models %}
+                                        <option value="{{ model }}">{{ model }}</option>
+                                    {% endfor %}
+                                </select>
+                                <small class="form-text text-muted">Select the Ollama model to use for embeddings.</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Create Index</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Existing RAG Indexes -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="mb-0">Existing RAG Indexes</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if indexes %}
+                            <ul class="list-group">
+                                {% for index in indexes %}
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h5>{{ index.name }}</h5>
+                                            <p class="mb-1">
+                                                <strong>Base Model:</strong> {{ index.base_model.display_name }}<br>
+                                                <strong>Embedding Model:</strong> {{ index.embedding_model_name }}<br>
+                                                <strong>Creator:</strong> {{ index.creator.username }} on {{ index.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                            </p>
+
+                                            <!-- RAG Indexing Progress -->
+                                            <div class="progress-container" id="progress-container-{{ index.id }}" data-initial-status="{{ index.indexing_status }}">
+                                                <div class="d-flex align-items-center">
+                                                    <div class="status-icon mr-2" id="status-icon-{{ index.id }}"></div>
+                                                    <div class="progress-bar-wrapper flex-grow-1" id="progress-bar-{{ index.id }}"></div>
+                                                </div>
+                                                <div class="error-details mt-1 text-danger" id="error-details-{{ index.id }}" style="display: none;"></div>
+                                                <div class="document-list mt-2" id="document-list-{{ index.id }}" style="display: none;">
+                                                    <strong>Documents:</strong>
+                                                    <ul class="list-unstyled mb-0">
+                                                        {% for doc in index.documents %}
+                                                            <li><small>{{ doc.filename }}</small></li>
+                                                        {% else %}
+                                                            <li><small>No documents associated.</small></li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                </div>
+                                            </div>
+
+                                            <div class="mt-2">
+                                                <span class="badge badge-primary">RAG Model: {{ index.model_entry.display_name if index.model_entry else 'None' }}</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <button class="btn btn-sm btn-outline-primary manage-docs-btn mb-2" data-toggle="modal" data-target="#manageDocumentsModal" data-index-id="{{ index.id }}" data-index-name="{{ index.name }}">Manage Documents</button>
+                                            <button class="btn btn-sm btn-outline-danger delete-rag-index-btn" data-index-id="{{ index.id }}" data-index-name="{{ index.name }}">Delete Index & Model</button>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p>No RAG indexes have been created yet.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- RAG Documents Tab -->
+            <div class="tab-pane fade" id="documents" role="tabpanel" aria-labelledby="documents-tab">
+                <h2>Manage RAG Documents</h2>
+                <!-- Document Upload Form -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3 class="mb-0">Upload New Document</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('upload_rag_document') }}" enctype="multipart/form-data">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="form-group">
+                                <label for="document">Select Document</label>
+                                <input type="file" class="form-control-file" id="document" name="document" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Upload Document</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Existing RAG Documents -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="mb-0">Uploaded Documents</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if documents %}
+                            <ul class="list-group">
+                                {% for doc in documents %}
+                                    <li class="list-group-item">
+                                        <strong>{{ doc.filename }}</strong> ({{ (doc.filesize / 1024)|round(2) }} KB)<br>
+                                        <small class="text-muted">Uploaded by {{ doc.uploader.username }} on {{ doc.uploaded_at.strftime('%Y-%m-%d') }}</small>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p>No documents have been uploaded yet.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+<!-- Manage Documents Modal -->
+<div class="modal fade" id="manageDocumentsModal" tabindex="-1" aria-labelledby="manageDocumentsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="manageDocumentsModalLabel">Manage Documents for Index: <span id="modalIndexName"></span></h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="manageDocumentsForm">
+                    <input type="hidden" id="modalIndexId" name="index_id">
+                    <p>Select the documents to include in this index:</p>
+                    <div id="document-checklist" class="list-group">
+                        <!-- Document checklist will be populated by JavaScript -->
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveIndexDocumentsBtn">Save and Re-index</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    var allDocuments = JSON.parse($('#rag-admin-data').attr('data-documents'));
+    
+    // Setup CSRF protection for AJAX calls
+    $.ajaxSetup({
+        beforeSend: function(xhr, settings) {
+            if (!/^(GET|HEAD|OPTIONS|TRACE)$/i.test(settings.type) && !this.crossDomain) {
+                xhr.setRequestHeader("X-CSRFToken", $('meta[name="csrf-token"]').attr('content'));
+            }
+        }
+    });
+    
+    // Initialize toastr notifications
+    toastr.options = {
+        "closeButton": true,
+        "progressBar": true,
+        "positionClass": "toast-top-right",
+        "timeOut": "5000"
+    };
+    
+    // Handle RAG index deletion
+    $('.delete-rag-index-btn').on('click', function() {
+        const indexId = $(this).data('index-id');
+        const indexName = $(this).data('index-name');
+        
+        if (confirm(`Are you sure you want to delete the RAG index "${indexName}" and its associated model? This action cannot be undone.`)) {
+            const $btn = $(this);
+            const originalText = $btn.text();
+            $btn.prop('disabled', true).text('Deleting...');
+            
+            $.ajax({
+                url: "{{ url_for('delete_rag_index') }}",
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ index_id: indexId }),
+                success: function(response) {
+                    if (response.success) {
+                        toastr.success(response.message || 'RAG index and model deleted successfully');
+                        $btn.closest('li').fadeOut(400, function() {
+                            $(this).remove();
+                            if ($('.list-group-item').length === 0) {
+                                $('.list-group').html('<p>No RAG indexes have been created yet.</p>');
+                            }
+                        });
+                    } else {
+                        toastr.error(response.message || 'Failed to delete RAG index');
+                        $btn.prop('disabled', false).text(originalText);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    let errorMsg = 'Failed to delete RAG index';
+                    try {
+                        const resp = JSON.parse(xhr.responseText);
+                        errorMsg = resp.message || errorMsg;
+                    } catch (e) {}
+                    
+                    toastr.error(errorMsg);
+                    $btn.prop('disabled', false).text(originalText);
+                    console.error('Error deleting RAG index:', error);
+                }
+            });
+        }
+    });
+
+    $('#manageDocumentsModal').on('show.bs.modal', function (event) {
+        var button = $(event.relatedTarget);
+        var indexId = button.data('index-id');
+        var indexName = button.data('index-name');
+
+        var modal = $(this);
+        modal.find('#modalIndexName').text(indexName);
+        modal.find('#modalIndexId').val(indexId);
+
+        var checklist = modal.find('#document-checklist');
+        checklist.empty();
+        checklist.append('<p id="loading-indicator">Loading documents...</p>');
+        
+        $.ajax({
+            url: '/admin/rag/index/' + indexId + '/documents',
+            type: 'GET',
+            dataType: 'json',
+            success: function(response) {
+                checklist.empty();
+                var associatedDocIds = response.documents.map(function(doc) { return doc.id; });
+                
+                if (allDocuments.length > 0) {
+                    allDocuments.forEach(function(doc) {
+                        var isChecked = associatedDocIds.includes(doc.id) ? 'checked' : '';
+                        var listItem = $('<label class="list-group-item"></label>');
+                        var checkbox = $('<input type="checkbox" name="document_ids" value="' + doc.id + '" ' + isChecked + '>');
+                        listItem.append(checkbox);
+                        listItem.append(' ' + doc.filename);
+                        checklist.append(listItem);
+                    });
+                } else {
+                    checklist.append('<p class="text-muted">No documents have been uploaded yet.</p>');
+                }
+            },
+            error: function() {
+                checklist.empty();
+                checklist.append('<p class="text-danger">Failed to load documents. Please try again.</p>');
+            }
+        });
+    });
+
+    $('#saveIndexDocumentsBtn').on('click', function() {
+        var indexId = $('#modalIndexId').val();
+        var selectedDocIds = [];
+        $('input[name="document_ids"]:checked').each(function() {
+            selectedDocIds.push(parseInt($(this).val(), 10));
+        });
+        
+        $('#saveIndexDocumentsBtn').prop('disabled', true).text('Saving...');
+        
+        $.ajax({
+            url: '/admin/rag/index/' + indexId + '/update_documents',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                document_ids: selectedDocIds
+            }),
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    toastr.success(response.message);
+                } else {
+                    toastr.error(response.message || 'An error occurred while updating documents');
+                }
+                $('#manageDocumentsModal').modal('hide');
+                
+                setTimeout(function() {
+                    location.reload();
+                }, 1500);
+            },
+            error: function() {
+                toastr.error('Failed to save document selections. Please try again.');
+                $('#saveIndexDocumentsBtn').prop('disabled', false).text('Save and Re-index');
+            }
+        });
+    });
+
+    // --- RAG Index Progress Polling (Smart Polling) ---
+    const pollingIntervals = {};
+
+    function updateProgressUI(indexId, data) {
+        let container = document.getElementById(`progress-container-${indexId}`);
+        let barDiv = document.getElementById(`progress-bar-${indexId}`);
+        let iconDiv = document.getElementById(`status-icon-${indexId}`);
+        let errorDiv = document.getElementById(`error-details-${indexId}`);
+        let docListDiv = document.getElementById(`document-list-${indexId}`);
+
+        if (!container || !barDiv || !iconDiv || !errorDiv || !docListDiv) return;
+
+        const isFinalStatus = ['success', 'failed'].includes(data.status);
+
+        // Show container for any non-pending status, otherwise hide
+        if (data.status && data.status !== 'pending') {
+            container.style.display = 'block';
+        } else {
+            container.style.display = 'none';
+            return;
+        }
+
+        if (data.status === 'in_progress') {
+            let percent = data.indexing_progress || 0;
+            barDiv.innerHTML = `
+                <div class="progress" style="height: 20px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${percent}%;" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100">
+                        ${percent}%
+                    </div>
+                </div>`;
+            iconDiv.innerHTML = '<span style="font-size: 20px;">⏳</span>';
+            errorDiv.style.display = 'none';
+            docListDiv.style.display = 'none';
+        } else if (isFinalStatus) {
+            barDiv.innerHTML = ''; // Clear progress bar
+            if (data.status === 'success') {
+                iconDiv.innerHTML = '<span style="color: green; font-size: 20px;">✔️</span>';
+                errorDiv.style.display = 'none';
+                docListDiv.style.display = 'block'; // Show documents on success
+            } else { // 'failed'
+                iconDiv.innerHTML = '<span style="color: red; font-size: 20px;">❌</span>';
+                errorDiv.textContent = `Error: ${data.error_message || 'An unknown error occurred.'}`;
+                errorDiv.style.display = 'block';
+                docListDiv.style.display = 'none';
+            }
+            // Stop polling for this index
+            if (pollingIntervals[indexId]) {
+                clearInterval(pollingIntervals[indexId]);
+                delete pollingIntervals[indexId];
+            }
+        }
+    }
+
+    function pollRagProgress(indexId) {
+        fetch(`/api/rag_index/progress/${indexId}`)
+            .then(response => {
+                if (!response.ok) {
+                    if (pollingIntervals[indexId]) {
+                        clearInterval(pollingIntervals[indexId]);
+                        delete pollingIntervals[indexId];
+                    }
+                    return { status: 'failed', error_message: `API error: ${response.statusText}` };
+                }
+                return response.json();
+            })
+            .then(data => {
+                updateProgressUI(indexId, data);
+            })
+            .catch(error => {
+                console.error(`Error polling for index ${indexId}:`, error);
+                if (pollingIntervals[indexId]) {
+                    clearInterval(pollingIntervals[indexId]);
+                    delete pollingIntervals[indexId];
+                }
+                updateProgressUI(indexId, { status: 'failed', error_message: 'Polling failed to connect.' });
+            });
+    }
+
+    // --- Initialize Progress Display on Page Load ---
+    document.querySelectorAll('.progress-container').forEach(container => {
+        const indexId = container.id.split('-').pop();
+        const initialStatus = container.dataset.initialStatus;
+
+        // Immediately update UI based on server-rendered data
+        updateProgressUI(indexId, {
+            status: initialStatus,
+            indexing_progress: container.dataset.initialProgress || 0,
+            error_message: container.dataset.initialError || ''
+        });
+
+        // Only start polling if the index is currently 'in_progress'
+        if (initialStatus === 'in_progress') {
+            pollRagProgress(indexId); // Initial poll to get latest data
+            pollingIntervals[indexId] = setInterval(() => pollRagProgress(indexId), 2500);
+        }
+    });
+});
+</script>
+</body>
+</html>

@@ -69,6 +69,33 @@ docker compose up -d --build
   docker compose down -v
   ```
 
+### Running the Pre-built Image from Docker Hub
+
+A pre-built image is available on Docker Hub for convenience. This is suitable if you are running your own MySQL and Ollama services separately.
+
+1.  **Prerequisites:**
+    *   A running MySQL server.
+    *   A running Ollama service.
+    *   Docker installed.
+
+2.  **Run the container:**
+    You must provide the necessary environment variables for the application to connect to your database and Ollama instance.
+
+    ```bash
+    docker run -d -p 5001:5001 \
+      -e SECRET_KEY='your-super-secret-key' \
+      -e MYSQL_HOST='your_mysql_host_ip' \
+      -e MYSQL_USER='your_mysql_user' \
+      -e MYSQL_PASSWORD='your_mysql_password' \
+      -e MYSQL_DATABASE='your_mysql_db' \
+      -e OLLAMA_HOST='http://your_ollama_host_ip:11434' \
+      --name sadeh-app \
+      mmdmirh/sadeh-app:latest
+    ```
+
+3.  **Access the Application:**
+    *   Open your browser and go to: [http://localhost:5001](http://localhost:5001)
+
 ## Environment Variables Reference
 See `deploy/.env.example` for all available options. Key variables:
 - `SECRET_KEY` – Flask app secret
