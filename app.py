@@ -1,10 +1,20 @@
+# In order to use the latest version of sqlite3, we need to import it before any other libraries that might use it.
+# This is a workaround for the fact that the default sqlite3 version in the system is too old for chromadb.
+# see: https://docs.trychroma.com/troubleshooting#sqlite
+try:
+    __import__('pysqlite3')
+    import sys
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except ImportError:
+    print("pysqlite3 not found, using default sqlite3")
+
 import os
 import chromadb
 from chromadb.config import Settings
 
 
 
-# No longer need SQLite override since we're using MySQL for ChromaDB
+
 
 import sys
 import io
@@ -1712,6 +1722,13 @@ def voice_help():
 # ===========================
 # Endpoint to Call the AI Model and Stream Response
 # ===========================
+def format_sse(data: str, event: str = None) -> str:
+    """Formats a string according to the Server-Sent Events protocol."""
+    msg = f'data: {data}\n\n'
+    if event is not None:
+        msg = f'event: {event}\n{msg}'
+    return msg
+
 def stream_llm_response(model_name, messages_history):
     """Streams response from the configured LLM service with robust error handling."""
     app.logger.info(f"--> Entering stream_llm_response for model: {model_name}")
@@ -1726,28 +1743,36 @@ def stream_llm_response(model_name, messages_history):
         app.logger.info("--> Got generator object from llm_service.stream_chat.")
         app.logger.info("--> Starting the generator iteration loop")
         
-        for chunk in stream_generator:
-            app.logger.debug(f"Raw chunk from llm_service (type: {type(chunk)}): {str(chunk)[:150]}")
-            
-            if isinstance(chunk, str) and chunk.startswith('data:'):
-                app.logger.debug("--> Chunk is a pre-formatted SSE string. Passing through.")
-                yield chunk if chunk.endswith('\n\n') else chunk + '\n\n'
-                sent_any_chunk = True
-            elif isinstance(chunk, dict):
-                app.logger.debug("--> Chunk is a dictionary. Formatting into SSE.")
-                text_content = chunk.get('message', {}).get('content', '') or chunk.get('response', '')
-                if text_content:
-                    sse_chunk = f"data: {json.dumps({'text': text_content})}\n\n"
-                    yield sse_chunk
+        i = 0
+        try:
+            for i, chunk in enumerate(stream_generator):
+                app.logger.debug(f"Raw chunk from llm_service (type: {type(chunk)}): {str(chunk)[:150]}")
+                
+                if isinstance(chunk, str) and chunk.startswith('data:'):
+                    app.logger.debug("--> Chunk is a pre-formatted SSE string. Passing through.")
+                    yield chunk if chunk.endswith('\n\n') else chunk + '\n\n'
                     sent_any_chunk = True
+                elif isinstance(chunk, dict):
+                    app.logger.debug("--> Chunk is a dictionary. Formatting into SSE.")
+                    text_content = chunk.get('message', {}).get('content', '') or chunk.get('response', '')
+                    if text_content:
+                        sse_chunk = f"data: {json.dumps({'text': text_content})}\n\n"
+                        yield sse_chunk
+                        sent_any_chunk = True
+                    else:
+                        app.logger.warning(f"--> Received a dictionary chunk with no text content: {chunk}")
                 else:
-                    app.logger.warning(f"--> Received a dictionary chunk with no text content: {chunk}")
-            else:
-                app.logger.warning(f"--> Received an unexpected chunk type: {type(chunk)}. Chunk: {str(chunk)[:150]}")
-
-        error_text = f"Error during {llm_service_type} stream: {traceback.format_exc()}"
-        yield format_sse(error_text, 'error')
-        sent_any_chunk = True # We sent an error chunk
+                    app.logger.warning(f"--> Received an unexpected chunk type: {type(chunk)}. Chunk: {str(chunk)[:150]}")
+            app.logger.info(f"Exited streaming loop after {i+1} chunks.")
+        except Exception as e:
+            llm_service_type = app.config.get('LLM_SERVICE', 'unknown')
+            app.logger.error(f"Error during {llm_service_type} stream: {e}", exc_info=True)
+            error_payload = json.dumps({
+                "error": f"Error during {llm_service_type} stream: {e}",
+                "text": f"⚠️ An error occurred while streaming the response."
+            })
+            yield format_sse(error_payload, 'error')
+            sent_any_chunk = True
     finally:
         app.logger.info(f"--> Exiting stream_llm_response for model: {model_name}")
         if not sent_any_chunk:
@@ -3746,6 +3771,7 @@ def check_database_connection():
                 app.logger.error("Max retries reached. Could not connect to the database.")
                 return False
             time.sleep(5)  # Wait before retrying
+
 
 if __name__ == '__main__':
     # Check dependencies

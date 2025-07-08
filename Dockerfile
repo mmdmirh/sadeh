@@ -1,6 +1,6 @@
 # ---- Builder Stage ----
 # This stage compiles Python dependencies into wheels.
-FROM python:3.11-slim-bullseye as builder
+FROM python:3.11-slim-bullseye AS builder
 
 # Set environment variables for build
 ENV PYTHONDONDONTWRITEBYTECODE=1 \
@@ -9,7 +9,13 @@ ENV PYTHONDONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install build-time system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
+    printf "%s\n" \
+    "deb http://deb.debian.org/debian bullseye main" \
+    "deb http://security.debian.org/debian-security bullseye-security main" \
+    "deb http://deb.debian.org/debian bullseye-updates main" \
+    > /etc/apt/sources.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     default-libmysqlclient-dev \
     libpq-dev \
@@ -37,15 +43,22 @@ ENV PYTHONDONDONTWRITEBYTECODE=1 \
 RUN addgroup --system app && adduser --system --group app
 
 # Install runtime system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
+    printf "%s\n" \
+    "deb http://deb.debian.org/debian bullseye main" \
+    "deb http://security.debian.org/debian-security bullseye-security main" \
+    "deb http://deb.debian.org/debian bullseye-updates main" \
+    > /etc/apt/sources.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
-    libxrender1 \
     libxext6 \
+    libxrender1 \
     ffmpeg \
     libmariadb3 \
     libpq5 \
+    default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
@@ -55,7 +68,7 @@ WORKDIR /home/app
 COPY --from=builder /wheelhouse /wheelhouse
 
 # Install Python dependencies from wheels
-RUN pip install --no-cache-dir /wheelhouse/*
+RUN pip install --no-cache-dir /wheelhouse/*.whl
 
 # Copy application code
 COPY . .

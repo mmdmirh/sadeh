@@ -68,7 +68,7 @@ flask init-db
 
 # Setup ChromaDB database
 >&2 echo "=== Setting up ChromaDB MySQL database... ==="
-python /app/scripts/setup_chroma_db.py
+python scripts/setup_chroma_db.py
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
     >&2 echo "=== Failed to setup ChromaDB database. Continuing anyway... ==="
