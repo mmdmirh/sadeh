@@ -63,7 +63,10 @@ done
 # Create empty directory for mysql init scripts
 mkdir -p mysql/initdb.d
 
-echo "✅ All files downloaded."
+# Make the ollama entrypoint script executable
+chmod +x ollama_config/ollama_entrypoint.sh
+
+echo "✅ All files downloaded and configured."
 
 # 3. Create and configure the .env file
 if [ ! -f .env ]; then
