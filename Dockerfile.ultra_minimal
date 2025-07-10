@@ -1,0 +1,49 @@
+# Ultra minimal Dockerfile for sadeh-app
+# With network resilience improvements
+
+FROM python:3.11-slim-bullseye
+
+# Set environment variables for minimal image
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=100 \
+    PIP_RETRIES=10 \
+    PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org"
+
+# Create a non-root user
+RUN addgroup --system app && adduser --system --group app
+
+# Install only the absolute minimum system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set work directory
+WORKDIR /home/app
+
+# Create a minimal requirements file with just the absolute essentials
+RUN echo "Flask>=2.0.0\ngunicorn>=20.1.0\npymysql>=1.0.0" > minimal_requirements.txt
+
+# Install only core Python dependencies with retry mechanism
+RUN pip install --no-cache-dir -r minimal_requirements.txt
+
+# Copy application code
+COPY . .
+
+# Set appropriate ownership of app files
+RUN chown -R app:app /home/app && \
+    chmod +x /home/app/wait-for-db.sh
+
+# Switch to non-root user
+USER app
+
+# Expose port for gunicorn
+EXPOSE 5001
+
+# Set entry point to wait for database
+ENTRYPOINT ["/home/app/wait-for-db.sh"]
+
+# Start gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--timeout", "180", "--workers", "1", "app:app"]

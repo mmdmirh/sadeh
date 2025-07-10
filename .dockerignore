@@ -18,3 +18,8 @@
 **/*.pth
 **/*.pt
 **/__pycache__/
+
+# Exclude RAG data, indexes, and uploads
+rag_documents/
+rag_indexes/
+rag_uploads/

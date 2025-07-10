@@ -34,6 +34,7 @@ import concurrent.futures
 
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, send_file, jsonify, session, stream_with_context
 from sqlalchemy import create_engine, event, text, inspect, and_, or_, not_, desc, asc, func, exc
+from sqlalchemy.orm import joinedload
 
 
 from flask_sqlalchemy import SQLAlchemy
@@ -61,7 +62,7 @@ from pathlib import Path
 # Langchain imports for RAG
 # Using the newer package-specific imports to avoid deprecation warnings
 from langchain_chroma import Chroma
-from langchain_community.embeddings import OllamaEmbeddings
+
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredFileLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
@@ -70,18 +71,26 @@ from langchain_ollama import OllamaEmbeddings
 from llm_service import LLMServiceFactory
 
 # ===========================
-# Background Model Pulling
-# ===========================
+# Background Model Pull
+import threading
+import os
+import ollama
+
 def _run_pull_command(model_name, app_instance):
     with app_instance.app_context():
         try:
             app_instance.logger.info(f'Starting background pull for embedding model: {model_name}')
-            result = subprocess.run(['ollama', 'pull', model_name], check=True, capture_output=True, text=True)
+            ollama_host = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
+            client = ollama.Client(host=ollama_host)
+            response = client.pull(model_name)
+            # The ollama.pull method streams output, so we need to consume it
+            for chunk in response:
+                app_instance.logger.debug(f'Ollama pull progress for {model_name}: {chunk}')
             app_instance.logger.info(f'Successfully pulled embedding model: {model_name}')
-        except FileNotFoundError:
-            app_instance.logger.error(f'Ollama command not found. Please ensure Ollama is installed and in your PATH.')
-        except subprocess.CalledProcessError as e:
-            app_instance.logger.error(f'Failed to pull embedding model {model_name}. Error: {e.stderr}')
+        except ollama.ResponseError as e:
+            app_instance.logger.error(f'Failed to pull embedding model {model_name} via Ollama API. Error: {e}')
+        except Exception as e:
+            app_instance.logger.error(f'An unexpected error occurred while pulling embedding model {model_name}: {e}')
 
 def pull_embedding_models_in_background(app_instance):
     app_instance.logger.info("--- Running V3 of pull_embedding_models_in_background ---")
@@ -248,7 +257,8 @@ def create_or_update_rag_index(index_id: int) -> bool:
             app.logger.info(f"[RAG]   → Document {doc_idx+1}/{len(rag_index.documents)}: {doc.filename} (id={doc.id})")
             try:
                 doc_start = time.time()
-                chunks = load_and_process_document(doc.filepath, doc.mime_type)
+                full_doc_filepath = Path(app.config['RAG_UPLOAD_FOLDER']) / doc.filepath
+                chunks = load_and_process_document(str(full_doc_filepath), doc.mime_type)
                 all_chunks.extend(chunks)
                 app.logger.info(f"[RAG]     - Split into {len(chunks)} chunks in {time.time()-doc_start:.2f}s")
                 for chunk_idx, chunk in enumerate(chunks):
@@ -308,7 +318,7 @@ def create_or_update_rag_index(index_id: int) -> bool:
 
         # ───────────────────────────────────────────────── EMBEDDING FUNCTION
         from chromadb.utils import embedding_functions as chromadb_ef
-        from langchain_community.embeddings import OllamaEmbeddings, HuggingFaceEmbeddings
+        from langchain_community.embeddings import HuggingFaceEmbeddings
 
         embedding_model_name = rag_index.embedding_model_name
         app.logger.info(f"[RAG] Preparing embedding function for model: {embedding_model_name}")
@@ -468,7 +478,8 @@ if not os.path.exists('static/uploads'):
     os.makedirs('static/uploads')
 
 # Define and create RAG-specific folders
-RAG_UPLOAD_FOLDER = Path(app.root_path) / 'rag_uploads'
+RAG_UPLOAD_FOLDER = Path(app.root_path) / 'rag_documents'
+app.config['RAG_UPLOAD_FOLDER'] = RAG_UPLOAD_FOLDER
 RAG_INDEX_FOLDER = Path(app.root_path) / 'rag_indexes'
 if not os.path.exists(RAG_UPLOAD_FOLDER):
     os.makedirs(RAG_UPLOAD_FOLDER)
@@ -3080,7 +3091,7 @@ def upload_rag_document():
             new_doc = RagDocument(
                 filename=filename,
                 stored_filename=stored_filename,
-                filepath=filepath,
+                filepath=stored_filename,
                 filesize=filesize,
                 mime_type=mime_type,
                 uploaded_by_id=current_user.id
