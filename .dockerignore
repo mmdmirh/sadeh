@@ -10,6 +10,7 @@
 !static/js/**
 !templates/**
 !migrations/**
+!db/
 !scripts/**
 !deploy/**
 # Still exclude large files/dirs even if in included directories

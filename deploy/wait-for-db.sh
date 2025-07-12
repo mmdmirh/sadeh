@@ -1,4 +1,5 @@
 #!/bin/sh
+set -x
 # wait-for-db.sh
 # Wait for MySQL to be fully ready
 
@@ -58,13 +59,19 @@ fi
 
 >&2 echo "=== MySQL is ready. Applying database migrations... ==="
 # First, generate any new migration scripts based on model changes
+echo "Running flask db migrate..."
 flask db migrate -m "auto migration" || true
+echo "flask db migrate finished."
 
 # Then, apply all migrations to bring the schema up to date
+echo "Running flask db upgrade..."
 flask db upgrade
+echo "flask db upgrade finished."
 
 # Finally, run our custom command to populate the DB with initial data
+echo "Running flask init-db..."
 flask init-db
+echo "flask init-db finished."
 
 # Setup ChromaDB database
 >&2 echo "=== Setting up ChromaDB MySQL database... ==="
@@ -78,4 +85,5 @@ fi
 
 >&2 echo "=== Database setup complete. Starting application... ==="
 
+echo "Executing final command: $cmd"
 exec $cmd

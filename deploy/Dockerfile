@@ -34,7 +34,7 @@ COPY . .
 
 # Set appropriate ownership of app files
 RUN chown -R app:app /home/app && \
-    chmod +x /home/app/wait-for-db.sh
+    chmod +x /home/app/deploy/wait-for-db.sh
 
 # Switch to non-root user
 USER app
@@ -43,7 +43,7 @@ USER app
 EXPOSE 5001
 
 # Set entry point to wait for database
-ENTRYPOINT ["/home/app/wait-for-db.sh"]
+ENTRYPOINT ["/home/app/deploy/wait-for-db.sh"]
 
 # Start gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--timeout", "180", "--workers", "1", "app:app"]

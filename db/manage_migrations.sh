@@ -21,7 +21,7 @@ MIGRATION_MESSAGE="${1:-$DEFAULT_MESSAGE}" # Use first argument as message, or d
 
 # Ensure the script is run from the project root where app.py and migrations folder are
 # This is a basic check; you might need a more robust one depending on your setup
-if [ ! -f "app.py" ] || [ ! -d "migrations" ]; then
+if [ ! -f "app.py" ] || [ ! -d "db/migrations" ]; then
     echo "Error: This script must be run from the project root directory"
     echo "       and after 'flask db init' has been executed."
     exit 1

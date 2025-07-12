@@ -40,6 +40,7 @@ from sqlalchemy.orm import joinedload
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
+from db.models import User, Conversation, ChatMessage, Document, PagePermission, Role, RagDocument, RagIndex, Model, user_roles, role_models, rag_doc_in_index
 from flask_login import LoginManager, login_user, logout_user, current_user, login_required, UserMixin
 from flask_migrate import Migrate
 from flask_mail import Mail, Message
@@ -514,7 +515,7 @@ app.config['SQLALCHEMY_POOL_RECYCLE'] = 280 # Recycle connections to prevent tim
 
 # Initialize SQLAlchemy with the app instance
 db.init_app(app)
-migrate = Migrate(app, db, compare_type=True)
+migrate = Migrate(app, db, directory='db/migrations', compare_type=True)
 
 # Configure Flask-Mail (read SMTP settings from environment)
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.example.com')
@@ -649,221 +650,6 @@ print("==============================\n")
 # Association Tables for RBAC
 # ===========================
 # Association table for User and Role (many-to-many)
-user_roles = db.Table('user_roles',
-    db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
-    db.Column('role_id', db.Integer, db.ForeignKey('role.id'), primary_key=True)
-)
-
-# Association table for Role and Model (many-to-many)
-role_models = db.Table('role_models',
-    db.Column('role_id', db.Integer, db.ForeignKey('role.id'), primary_key=True),
-    db.Column('model_id', db.Integer, db.ForeignKey('model.id'), primary_key=True)
-)
-
-# No explicit association table needed for PagePermission as it's a direct model with a ForeignKey to Role (one-to-many from Role's perspective)
-
-# ===========================
-# Database Models
-# ===========================
-class User(UserMixin, db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(64), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    firstname = db.Column(db.String(100), nullable=True)
-    lastname = db.Column(db.String(100), nullable=True)
-    # Increase length from 256 to 512 to accommodate modern hashes like scrypt
-    password_hash = db.Column(db.String(512))
-    confirmed = db.Column(db.Boolean, default=False)
-    is_active = db.Column(db.Boolean, nullable=False, default=True)  # New field for user active status
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    conversations = db.relationship('Conversation', backref='user', lazy=True)
-
-    # Relationship for roles (many-to-many)
-    # Roles assigned to this user
-    roles = db.relationship('Role', secondary=user_roles,
-                            lazy='subquery', backref=db.backref('users_in_role', lazy=True))
-
-    def can_access_page(self, page_endpoint):
-        """Check if the user can access a specific page based on their roles."""
-        if not self.is_active:
-            return False
-        # Admins have access to all pages by default (conventionally)
-        if self.has_role('admin'):
-            return True
-        for role in self.roles:
-            if role.has_page_access(page_endpoint):
-                return True
-        return False
-
-    def has_role(self, role_name):
-        """Check if the user has a specific role."""
-        return any(role.name == role_name for role in self.roles)
-
-    def can_access_model(self, model_id):
-        """Check if the user can access a specific model based on their roles."""
-        if self.has_role('admin'): # Admins can access all models
-            return True
-        for role in self.roles:
-            if role.has_model_access(model_id):
-                return True
-        return False
-
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-
-class Conversation(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    title = db.Column(db.String(100), default="New Conversation")
-    selected_model = db.Column(db.String(64))
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    document_mode = db.Column(db.Boolean, default=False)  # Add this line
-    messages = db.relationship('ChatMessage', backref='conversation', cascade="all, delete-orphan", lazy=True)
-    documents = db.relationship('Document', backref='conversation', cascade="all, delete-orphan", lazy=True)
-
-class ChatMessage(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    conversation_id = db.Column(db.Integer, db.ForeignKey('conversation.id'), nullable=False)
-    sender = db.Column(db.String(10))  # 'user' or 'ai'
-    content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-
-class Document(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    conversation_id = db.Column(db.Integer, db.ForeignKey('conversation.id'), nullable=False)
-    filename = db.Column(db.String(256))
-    data = db.Column(db.LargeBinary)  # store file as BLOB
-    mime_type = db.Column(db.String(128))
-    uploaded_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-
-class PagePermission(db.Model):
-    __tablename__ = 'page_permission'
-    id = db.Column(db.Integer, primary_key=True)
-    role_id = db.Column(db.Integer, db.ForeignKey('role.id'), nullable=False)
-    page_endpoint = db.Column(db.String(255), nullable=False) # e.g., 'chat', 'admin_rbac_page'
-
-    # Unique constraint to prevent duplicate permissions for the same role and page
-    __table_args__ = (db.UniqueConstraint('role_id', 'page_endpoint', name='_role_page_uc'),)
-
-    def __repr__(self):
-        return f"<PagePermission role_id={self.role_id} page='{self.page_endpoint}'>"
-
-
-class Role(db.Model):
-    __tablename__ = 'role'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), unique=True, nullable=False)
-    description = db.Column(db.String(255), nullable=True)
-
-    # Relationship to Model (many-to-many)
-    # Models that this role has access to
-    models = db.relationship('Model', secondary=role_models,
-                             lazy='subquery', backref=db.backref('roles_having_access', lazy=True))
-
-    # Relationship to PagePermission (one-to-many: one Role can have many PagePermissions)
-    page_permissions = db.relationship('PagePermission', backref='role', lazy='dynamic', cascade="all, delete-orphan")
-
-    def has_page_access(self, page_endpoint):
-        """Check if this role has permission for a specific page endpoint."""
-        return self.page_permissions.filter_by(page_endpoint=page_endpoint).first() is not None
-
-    def has_model_access(self, model_id):
-        """Check if this role has access to a specific model by its ID."""
-        # self.models is the relationship to Model (many-to-many)
-        if not hasattr(self, 'models') or not self.models:
-            return False
-        return any(model.id == model_id for model in self.models)
-
-    def __repr__(self):
-        return f'<Role {self.name}>'
-
-# Association table for RAG Documents and RAG Indexes (many-to-many)
-rag_doc_in_index = db.Table('rag_doc_in_index',
-    db.Column('rag_document_id', db.Integer, db.ForeignKey('rag_document.id'), primary_key=True),
-    db.Column('rag_index_id', db.Integer, db.ForeignKey('rag_index.id'), primary_key=True)
-)
-
-class RagDocument(db.Model):
-    __tablename__ = 'rag_document'
-    id = db.Column(db.Integer, primary_key=True)
-    filename = db.Column(db.String(256), nullable=False) # Original filename
-    stored_filename = db.Column(db.String(256), unique=True, nullable=False) # UUID-based filename on disk
-    filepath = db.Column(db.String(512), nullable=False) # Full path to the stored file
-    filesize = db.Column(db.Integer, nullable=True) # In bytes
-    mime_type = db.Column(db.String(128), nullable=True)
-    uploaded_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    uploaded_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-
-    uploader = db.relationship('User', backref=db.backref('uploaded_rag_documents', lazy=True))
-    indexes = db.relationship('RagIndex', secondary=rag_doc_in_index,
-                              lazy='subquery', backref=db.backref('documents', lazy=True))
-
-    def __repr__(self):
-        return f'<RagDocument {self.filename}>'
-
-class RagIndex(db.Model):
-    __tablename__ = 'rag_index'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(128), unique=True, nullable=False) # User-defined name for the RAG model
-    # Base LLM model used for generation after retrieval
-    base_model_id = db.Column(db.Integer, db.ForeignKey('model.id'), nullable=False)
-    # Path relative to RAG_INDEX_FOLDER where ChromaDB stores its files for this index
-    vector_store_path_segment = db.Column(db.String(256), unique=True, nullable=False)
-    chunk_size = db.Column(db.Integer, nullable=False, default=500)
-    chunk_overlap = db.Column(db.Integer, nullable=False, default=100)
-    embedding_model_name = db.Column(db.String(255), nullable=False, default='nomic-embed-text')
-    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-
-    creator = db.relationship('User', backref=db.backref('created_rag_indexes', lazy=True))
-    base_model = db.relationship('Model', foreign_keys=[base_model_id], backref=db.backref('used_as_rag_base', lazy=True))
-    # The 'documents' backref is created by RagDocument.indexes
-    # The corresponding Model entry that represents this RAG index in UI
-    model_entry = db.relationship('Model', foreign_keys='Model.rag_index_id', backref=db.backref('rag_definition', uselist=False, lazy=True),  primaryjoin="Model.rag_index_id == RagIndex.id")
-
-    # --- New Fields for Persistent Progress Tracking ---
-    indexing_status = db.Column(db.String(20), nullable=False, default='pending')
-    indexing_progress = db.Column(db.Integer, nullable=False, default=0)
-    indexing_error_message = db.Column(db.Text, nullable=True)
-
-
-    @property
-    def get_vector_store_path(self):
-        return RAG_INDEX_FOLDER / self.vector_store_path_segment
-
-    def __repr__(self):
-        return f'<RagIndex {self.name}>'
-
-class Model(db.Model):
-    __tablename__ = 'model'
-    id = db.Column(db.Integer, primary_key=True)
-    # The exact name Ollama uses, e.g., "llama3:8b-instruct-q5_K_M"
-    ollama_model_name = db.Column(db.String(128), unique=True, nullable=False, index=True)
-    # A user-friendly name for UIs, e.g., "Llama 3 8B Instruct"
-    display_name = db.Column(db.String(128), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    # Useful for grouping or identifying the family of the model, e.g., "llama3", "gemma"
-    base_model_identifier = db.Column(db.String(128), nullable=True)
-    # Flag to enable/disable in the app without deleting from DB or Ollama
-    is_active = db.Column(db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    # 'roles_having_access' backref is created by Role.models relationship
-
-    # RAG specific fields
-    is_rag_model = db.Column(db.Boolean, default=False, nullable=False)
-    # If is_rag_model is True, this points to the original LLM used for generation
-    base_rag_model_id = db.Column(db.Integer, db.ForeignKey('model.id'), nullable=True)
-    # If is_rag_model is True, this points to the RagIndex definition
-    rag_index_id = db.Column(db.Integer, db.ForeignKey('rag_index.id', name='fk_model_rag_index_id', use_alter=True), nullable=True)
-
-    base_rag_model_for = db.relationship('Model', remote_side=[id], foreign_keys=[base_rag_model_id], backref=db.backref('rag_variants_using_this_base', lazy=True))
-    # rag_definition backref is created by RagIndex.model_entry
-
-    def __repr__(self):
-        return f'<Model {self.display_name} ({self.ollama_model_name})>'
 
 
 @login_manager.user_loader
@@ -3812,5 +3598,3 @@ if __name__ == '__main__':
         app.logger.error(f"Failed to initialize database: {str(e)}")
         exit(1)
     
-    # Run the application
-    app.run(debug=True, host='0.0.0.0', port=5001)
