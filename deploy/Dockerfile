@@ -19,7 +19,7 @@ RUN addgroup --system app && adduser --system --group app
 WORKDIR /home/app
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY backend/requirements.txt .
 
 # Install dependencies with explicit pip flags for reliability
 RUN pip install --no-cache-dir --timeout=300 --retries=10 pysqlite3-binary -r requirements.txt \
@@ -27,7 +27,13 @@ RUN pip install --no-cache-dir --timeout=300 --retries=10 pysqlite3-binary -r re
     && pip install --no-cache-dir --timeout=300 --retries=10 httpx
 
 # Copy application code
-COPY . .
+COPY backend /home/app/backend
+COPY deploy/wait-for-db.sh /home/app/deploy/wait-for-db.sh
+COPY backend/db/db/migrations /home/app/backend/db/db/migrations
+
+# Create scripts directory and copy ChromaDB setup script
+RUN mkdir -p /home/app/scripts
+COPY backend/db_folder/setup_chroma_db.py /home/app/scripts/setup_chroma_db.py
 
 # Fix format_sse function reference issue
 
@@ -46,4 +52,4 @@ EXPOSE 5001
 ENTRYPOINT ["/home/app/deploy/wait-for-db.sh"]
 
 # Start gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--timeout", "180", "--workers", "1", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--timeout", "180", "--workers", "1", "backend.sadeh_core.app:app"]
