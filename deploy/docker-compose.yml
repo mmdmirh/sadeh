@@ -57,9 +57,7 @@ services:
   app:
     networks:
       - app_network
-    build:
-      context: ..
-      dockerfile: ./deploy/Dockerfile
+    image: mmdmirh/sadeh-app:latest
     container_name: ai-chat-web
     deploy:
       resources:
