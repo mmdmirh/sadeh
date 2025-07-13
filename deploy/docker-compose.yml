@@ -57,9 +57,7 @@ services:
   app:
     networks:
       - app_network
-    build:
-      context: ..
-      dockerfile: ./deploy/Dockerfile
+    image: mmdmirh/sadeh-app:latest
     container_name: ai-chat-web
     deploy:
       resources:
@@ -71,12 +69,15 @@ services:
     volumes:
       - ../rag_documents:/home/app/rag_documents
     environment:
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_USER: ${MYSQL_USER:-sadeh_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sadeh_password}
-      MYSQL_DB: ${MYSQL_DATABASE:-sadeh_db}
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=sadeh_user
+      - MYSQL_PASSWORD=sadeh_password
+      - MYSQL_DB=sadeh_db
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODELS=tinyllama:1.1b-chat-v1-q2_K
+      - OLLAMA_EMBEDDING_MODELS=nomic-embed-text
+      - PYTHONPATH=/home/app
     command: /home/app/deploy/wait-for-db.sh gunicorn --bind 0.0.0.0:5001 --timeout 180 --workers 1 app:app
     depends_on:
       mysql:
