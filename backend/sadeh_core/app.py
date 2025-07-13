@@ -9,8 +9,7 @@ except ImportError:
     print("pysqlite3 not found, using default sqlite3")
 
 import os
-import chromadb
-from chromadb.config import Settings
+from backend.db_folder.chroma_db import get_chroma_client, get_embedding_function
 
 
 
@@ -37,10 +36,8 @@ from sqlalchemy import create_engine, event, text, inspect, and_, or_, not_, des
 from sqlalchemy.orm import joinedload
 
 
-from flask_sqlalchemy import SQLAlchemy
-
-db = SQLAlchemy()
-from db.models import User, Conversation, ChatMessage, Document, PagePermission, Role, RagDocument, RagIndex, Model, user_roles, role_models, rag_doc_in_index
+from backend.db.db.extensions import db
+from backend.db.db.models import User, Conversation, ChatMessage, Document, PagePermission, Role, RagDocument, RagIndex, Model, user_roles, role_models, rag_doc_in_index
 from flask_login import LoginManager, login_user, logout_user, current_user, login_required, UserMixin
 from flask_migrate import Migrate
 from flask_mail import Mail, Message
@@ -63,13 +60,14 @@ from pathlib import Path
 # Langchain imports for RAG
 # Using the newer package-specific imports to avoid deprecation warnings
 from langchain_chroma import Chroma
+import chromadb # Keep this for now, will remove if not needed after other changes
 
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredFileLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
 
 # Import our new LLM service abstraction
-from llm_service import LLMServiceFactory
+from backend.llm.llm_service import LLMServiceFactory
 
 # ===========================
 # Background Model Pull
@@ -123,7 +121,7 @@ def pull_embedding_models_in_background(app_instance):
 # ===========================
 # Flask App Initialization
 # ===========================
-app = Flask(__name__, static_folder='static')
+app = Flask(__name__, static_folder='../../frontend/static', template_folder='../../frontend/templates')
 
 # === Set log level from environment variable (default to INFO) ===
 import logging
@@ -254,17 +252,29 @@ def create_or_update_rag_index(index_id: int) -> bool:
 
         # ─────────────────────────────────────────────── load & split docs
         all_chunks = []
-        for doc_idx, doc in enumerate(rag_index.documents):              # NOTE: doc is RagDocument
+        valid_documents = 0
+        phantom_documents = 0
+        
+        # Process all documents
+        for doc_idx, doc in enumerate(rag_index.documents):
             app.logger.info(f"[RAG]   → Document {doc_idx+1}/{len(rag_index.documents)}: {doc.filename} (id={doc.id})")
             try:
                 doc_start = time.time()
                 full_doc_filepath = Path(app.config['RAG_UPLOAD_FOLDER']) / doc.filepath
+    
+                # Check if the document file actually exists before trying to load it
+                if not full_doc_filepath.exists():
+                    app.logger.error(f"[RAG] Document file not found: {str(full_doc_filepath)} for doc_id={doc.id}. Skipping.")
+                    phantom_documents += 1
+                    continue
+            
+                valid_documents += 1
                 chunks = load_and_process_document(str(full_doc_filepath), doc.mime_type)
                 all_chunks.extend(chunks)
                 app.logger.info(f"[RAG]     - Split into {len(chunks)} chunks in {time.time()-doc_start:.2f}s")
+                
+                # Debug logging for chunks
                 for chunk_idx, chunk in enumerate(chunks):
-                    if chunk_idx == 0:
-                        app.logger.debug(f"[RAG]       DEBUG: type(chunk)={type(chunk)}, chunk={repr(chunk)}")
                     # Try to extract text for preview
                     if isinstance(chunk, dict) and 'text' in chunk:
                         chunk_text = chunk['text']
@@ -274,14 +284,28 @@ def create_or_update_rag_index(index_id: int) -> bool:
                         chunk_text = chunk
                     else:
                         chunk_text = str(chunk)
+                    
                     chunk_preview = chunk_text[:80].replace('\n', ' ')
                     app.logger.debug(f"[RAG]       Chunk {chunk_idx+1}/{len(chunks)}: {chunk_preview}{'...' if len(chunk_text)>80 else ''}")
             except Exception as e:
                 app.logger.error(f"[RAG]     FAILED to process {doc.filename}: {e}")
                 app.logger.error(traceback.format_exc())
 
+        # Check if we found any valid documents
+        if valid_documents == 0:
+            if phantom_documents > 0:
+                app.logger.warning(f"[RAG] All {phantom_documents} documents were phantom (missing files) - index creation skipped")
+                app.logger.info("================= [RAG] END INDEXING (ALL PHANTOM DOCUMENTS) =================\n")
+                # Return true since this is not a fatal error, just a state where no action is needed
+                return True
+            else:
+                app.logger.warning("[RAG] No documents in index - nothing to do")
+                app.logger.info("================= [RAG] END INDEXING (NO DOCUMENTS) =================\n")
+                return True
+
+        # If we have valid documents but no chunks were produced
         if not all_chunks:
-            app.logger.warning("[RAG] No chunks produced – aborting build")
+            app.logger.warning("[RAG] No chunks produced from valid documents – aborting build")
             app.logger.info("================= [RAG] END INDEXING (NO CHUNKS) =================\n")
             return False
 
@@ -290,77 +314,30 @@ def create_or_update_rag_index(index_id: int) -> bool:
         # This fix unsets those variables before initializing the client to ensure
         # the modern configuration is used.
         app.logger.info(f"[RAG] Initializing ChromaDB client for index path: {index_path}")
-        
-        try:
-            # Unset legacy environment variables that cause ChromaDB to fail.
-            legacy_vars = [
-                'CHROMA_DB_IMPL', 'CHROMA_API_IMPL', 
-                'CHROMA_PRODUCER_IMPL', 'CHROMA_CONSUMER_IMPL'
-            ]
-            for var in legacy_vars:
-                if var in os.environ:
-                    app.logger.warning(f"Unsetting deprecated ChromaDB env var: {var}")
-                    del os.environ[var]
-
-            # Use PersistentClient for local, on-disk storage. This is the correct
-            # client for creating and managing RAG indexes that persist across restarts.
-            client = chromadb.PersistentClient(
-                path=str(index_path),
-                settings=chromadb.config.Settings(
-                    anonymized_telemetry=False,
-                    is_persistent=True,
-                )
-            )
-            app.logger.info("ChromaDB PersistentClient successfully initialized.")
-            
-        except Exception as e:
-            app.logger.error(f"ChromaDB client initialization error: {str(e)}")
-            raise
+        client = get_chroma_client(str(index_path))
 
         # ───────────────────────────────────────────────── EMBEDDING FUNCTION
-        from chromadb.utils import embedding_functions as chromadb_ef
-        from langchain_community.embeddings import HuggingFaceEmbeddings
-
-        embedding_model_name = rag_index.embedding_model_name
-        app.logger.info(f"[RAG] Preparing embedding function for model: {embedding_model_name}")
-
-        # Create the embedding function for ChromaDB itself. This is what gets stored
-        # with the collection and used for queries if no other function is provided.
-        chroma_native_ef = None
-        # Create the LangChain-compatible embedding function for adding documents.
+        app.logger.info(f"[RAG] Initializing embedding function for model: {rag_index.embedding_model_name}")
         langchain_ef = None
-
         try:
-            # Prefer Ollama
-            chroma_native_ef = chromadb_ef.OllamaEmbeddingFunction(
-                url=f"{os.environ.get('OLLAMA_HOST', 'http://local-ollama:11434')}/api/embeddings",
-                model_name=embedding_model_name
+            chroma_native_ef = get_embedding_function(
+                embedding_model_name=rag_index.embedding_model_name,
+                ollama_host=app.config['OLLAMA_HOST'],
+                hf_token=os.getenv('HF_TOKEN')
             )
-            langchain_ef = OllamaEmbeddings(
-                base_url=os.environ.get('OLLAMA_HOST', 'http://local-ollama:11434'),
-                model=embedding_model_name
-            )
-            app.logger.info("[RAG] Using Ollama for both ChromaDB and LangChain embeddings.")
-        except Exception as e:
-            app.logger.warning(f"[RAG] Failed to init Ollama embeddings: {e}. Falling back to HuggingFace.")
-            # Fallback to HuggingFace
-            try:
-                chroma_native_ef = chromadb_ef.HuggingFaceEmbeddingFunction(
-                    api_key=os.environ.get('HF_API_KEY', None),
-                    model_name=embedding_model_name
-                )
-                langchain_ef = HuggingFaceEmbeddings(
-                    model_name=embedding_model_name,
-                    model_kwargs={'device': 'cpu'},
-                    encode_kwargs={'normalize_embeddings': True}
-                )
-                app.logger.info("[RAG] Using HuggingFace for both ChromaDB and LangChain embeddings.")
-            except Exception as hf_e:
-                app.logger.error(f"[RAG] FATAL: Failed to initialize HuggingFace embeddings as a fallback: {hf_e}")
+            if rag_index.embedding_model_name.startswith('ollama/'):
+                ollama_model_name = rag_index.embedding_model_name.split('ollama/')[1]
+                langchain_ef = OllamaEmbeddings(model=ollama_model_name, base_url=app.config['OLLAMA_HOST'])
+            elif rag_index.embedding_model_name.startswith('huggingface/'):
+                hf_model_name = rag_index.embedding_model_name.split('huggingface/')[1]
+                langchain_ef = HuggingFaceEmbeddings(model_name=hf_model_name, model_kwargs={'device': 'cpu'}, encode_kwargs={'normalize_embeddings': True})
+        except ValueError as e:
+            app.logger.error(f"[RAG] Error initializing embedding function: {e}")
+            raise
 
-        if not chroma_native_ef or not langchain_ef:
-            app.logger.error("[RAG] FATAL: Could not create embedding functions. Aborting build.")
-            return False
+        if not langchain_ef:
+            app.logger.error("[RAG] Failed to initialize Langchain embedding function.")
+            raise RuntimeError("Failed to initialize Langchain embedding function.")
 
         # ───────────────────────────────────────────────── CREATE COLLECTION
         # always recreate the collection for a clean rebuild
@@ -478,17 +455,8 @@ if not os.path.exists('static/js'):
 if not os.path.exists('static/uploads'):
     os.makedirs('static/uploads')
 
-# Define and create RAG-specific folders
-RAG_UPLOAD_FOLDER = Path(app.root_path) / 'rag_documents'
-app.config['RAG_UPLOAD_FOLDER'] = RAG_UPLOAD_FOLDER
+# Define and create RAG_INDEX_FOLDER
 RAG_INDEX_FOLDER = Path(app.root_path) / 'rag_indexes'
-if not os.path.exists(RAG_UPLOAD_FOLDER):
-    os.makedirs(RAG_UPLOAD_FOLDER)
-if not os.path.exists(RAG_INDEX_FOLDER):
-    os.makedirs(RAG_INDEX_FOLDER)
-
-if not os.path.exists(RAG_UPLOAD_FOLDER):
-    os.makedirs(RAG_UPLOAD_FOLDER)
 if not os.path.exists(RAG_INDEX_FOLDER):
     os.makedirs(RAG_INDEX_FOLDER)
 
@@ -515,7 +483,7 @@ app.config['SQLALCHEMY_POOL_RECYCLE'] = 280 # Recycle connections to prevent tim
 
 # Initialize SQLAlchemy with the app instance
 db.init_app(app)
-migrate = Migrate(app, db, directory='db/migrations', compare_type=True)
+migrate = Migrate(app, db, directory='backend/db/db/migrations', compare_type=True)
 
 # Configure Flask-Mail (read SMTP settings from environment)
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.example.com')
@@ -524,7 +492,13 @@ app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() in [
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER')
-app.config['RAG_DOCUMENTS_DIR'] = os.environ.get('RAG_DOCUMENTS_DIR', os.path.join(os.getcwd(), 'rag_documents'))
+# Define RAG_UPLOAD_FOLDER early to be used in both places
+RAG_UPLOAD_FOLDER = Path(app.root_path) / 'rag_documents'
+app.config['RAG_UPLOAD_FOLDER'] = RAG_UPLOAD_FOLDER
+app.config['RAG_DOCUMENTS_DIR'] = str(RAG_UPLOAD_FOLDER)  # Use the same path for consistency
+
+# Add Ollama configuration
+app.config['OLLAMA_HOST'] = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 mail = Mail(app)
 
 # Configure Flask-Login
@@ -542,6 +516,26 @@ app.config['MANAGED_OLLAMA_MODELS'] = []
 app.config['EFFECTIVE_DEFAULT_MODEL_NAME'] = None
 DEFAULT_MODEL_NAME = None # Will be determined by the logic below
 
+# Check if database tables exist and set up error handling
+import sqlalchemy.exc
+
+def is_database_initialized():
+    """Check if essential database tables exist"""
+    try:
+        # Try to query a table that should exist if the database is initialized
+        db.session.execute(db.select(User).limit(1))
+        return True
+    except sqlalchemy.exc.ProgrammingError as e:
+        app.logger.warning(f"Database tables not fully initialized: {str(e)}")
+        return False
+    except Exception as e:
+        app.logger.error(f"Error checking database status: {str(e)}")
+        return False
+
+# Check database status
+with app.app_context():
+    app.config['DATABASE_INITIALIZED'] = is_database_initialized()
+
 if llm_service_type == 'ollama':
     if llm_service and hasattr(llm_service, 'test_connection') and llm_service.test_connection(): # Ensure service is responsive
         ollama_models_env = os.environ.get('OLLAMA_MODELS')
@@ -553,6 +547,11 @@ if llm_service_type == 'ollama':
             app.logger.info(f"Models currently on Ollama server: {current_ollama_server_models}")
 
             successfully_managed_models_list = []
+            # Check if we're likely in a Docker container
+            is_docker = os.path.exists('/.dockerenv') or os.environ.get('RUNNING_IN_DOCKER') == 'true'
+            if is_docker:
+                app.logger.info("Running in Docker environment - will handle DNS resolution errors")
+                
             for model_name in managed_model_names_from_env:
                 is_on_server = False
                 for server_model in current_ollama_server_models:
@@ -565,11 +564,25 @@ if llm_service_type == 'ollama':
                     successfully_managed_models_list.append(model_name)
                 else:
                     app.logger.info(f"Model '{model_name}' not found on Ollama server. Attempting to pull...")
-                    if llm_service.pull_model(model_name): # pull_model returns True on success
-                        app.logger.info(f"Successfully pulled model '{model_name}'.")
-                        successfully_managed_models_list.append(model_name)
-                    else:
-                        app.logger.warning(f"Failed to pull model '{model_name}'. It will not be available through this managed list.")
+                    try:
+                        if llm_service.pull_model(model_name): # pull_model returns True on success
+                            app.logger.info(f"Successfully pulled model '{model_name}'.") 
+                            successfully_managed_models_list.append(model_name)
+                        else:
+                            app.logger.warning(f"Failed to pull model '{model_name}'. It will not be available through this managed list.")
+                    except Exception as e:
+                        error_msg = str(e).lower()
+                        # Check for DNS-related errors which are common in Docker environments
+                        if is_docker and ('name resolution' in error_msg or 'no such host' in error_msg or 'dns' in error_msg):
+                            app.logger.error(f"Docker DNS resolution error while pulling model '{model_name}': {str(e)}")
+                            app.logger.warning(f"Adding '{model_name}' to managed models list despite pull failure (DNS issue)")
+                            # In Docker with DNS issues, still add the model to the list so the app can function
+                            # This allows the app to work when network connectivity is restored without requiring restart
+                            successfully_managed_models_list.append(model_name)
+                        else:
+                            app.logger.error(f"Error pulling model '{model_name}': {str(e)}")
+                            app.logger.warning(f"Model '{model_name}' will not be available.")
+                            # For non-DNS errors, don't add the model to the managed list
             
             app.config['MANAGED_OLLAMA_MODELS'] = successfully_managed_models_list
             app.logger.info(f"Successfully managed Ollama models (available/pulled): {app.config['MANAGED_OLLAMA_MODELS']}")
@@ -934,47 +947,74 @@ def get_available_models_for_user(user):
     """
     if not user.is_authenticated:
         return []
+        
+    # If database is not initialized yet, use models from app.config
+    if not app.config.get('DATABASE_INITIALIZED', False):
+        app.logger.warning("Database not fully initialized, using managed models from config")
+        managed_models = app.config.get('MANAGED_OLLAMA_MODELS', [])
+        # Return all managed models without permissions check since DB isn't ready
+        return [{
+            'id': idx + 1,  # Temporary IDs
+            'name': model_name,
+            'ollama_model_name': model_name,
+            'description': f"Ollama model: {model_name}"
+        } for idx, model_name in enumerate(managed_models)]
+    
+    # Normal flow when database is available
+    try:
+        # 1. Get base model names from config (from Ollama)
+        llm_models_config = app.config.get('LLM_MODELS', [])
+        processed_ollama_names = []
+        if isinstance(llm_models_config, list):
+            for item in llm_models_config:
+                if isinstance(item, str):
+                    processed_ollama_names.append(item)
+                elif isinstance(item, dict):
+                    model_name = item.get('ollama_model_name')
+                    if model_name and isinstance(model_name, str):
+                        processed_ollama_names.append(model_name)
 
-    # 1. Get base model names from config (from Ollama)
-    llm_models_config = app.config.get('LLM_MODELS', [])
-    processed_ollama_names = []
-    if isinstance(llm_models_config, list):
-        for item in llm_models_config:
-            if isinstance(item, str):
-                processed_ollama_names.append(item)
-            elif isinstance(item, dict):
-                model_name = item.get('ollama_model_name')
-                if model_name and isinstance(model_name, str):
-                    processed_ollama_names.append(model_name)
-
-    # 2. Fetch corresponding models from DB
-    # Base models must be in the list from Ollama
-    base_models = Model.query.filter(
-        Model.is_active==True,
-        Model.is_rag_model==False,
-        Model.ollama_model_name.in_(processed_ollama_names)
-    ).all()
-    
-    # RAG models are just fetched if active
-    rag_models = Model.query.filter(
-        Model.is_active==True,
-        Model.is_rag_model==True
-    ).all()
-    
-    db_models_to_check = base_models + rag_models
-    
-    # 3. Filter by user permissions
-    accessible_models = []
-    for model_obj in db_models_to_check:
-        if user.can_access_model(model_obj.id):
-            accessible_models.append({
-                'id': model_obj.id, 
-                'name': model_obj.display_name, 
-                'ollama_model_name': model_obj.ollama_model_name, 
-                'description': model_obj.description
-            })
-    app.logger.debug(f"get_available_models_for_user: Found {len(accessible_models)} models for user {user.id}")
-    return accessible_models
+        # 2. Fetch corresponding models from DB
+        # Base models must be in the list from Ollama
+        base_models = Model.query.filter(
+            Model.is_active==True,
+            Model.is_rag_model==False,
+            Model.ollama_model_name.in_(processed_ollama_names)
+        ).all()
+        
+        # RAG models are just fetched if active
+        rag_models = Model.query.filter(
+            Model.is_active==True,
+            Model.is_rag_model==True
+        ).all()
+        
+        db_models_to_check = base_models + rag_models
+        
+        # 3. Filter by user permissions
+        accessible_models = []
+        for model_obj in db_models_to_check:
+            try:
+                if user.can_access_model(model_obj.id):
+                    accessible_models.append({
+                        'id': model_obj.id, 
+                        'name': model_obj.display_name, 
+                        'ollama_model_name': model_obj.ollama_model_name, 
+                        'description': model_obj.description
+                    })
+            except Exception as e:
+                app.logger.warning(f"Error checking model access for model {model_obj.id}: {str(e)}")
+        app.logger.debug(f"get_available_models_for_user: Found {len(accessible_models)} models for user {user.id}")
+        return accessible_models
+    except Exception as e:
+        app.logger.error(f"Error retrieving models: {str(e)}")
+        # Fallback to managed models from config
+        managed_models = app.config.get('MANAGED_OLLAMA_MODELS', [])
+        return [{
+            'id': idx + 1,  # Temporary IDs
+            'name': model_name,
+            'ollama_model_name': model_name,
+            'description': f"Ollama model: {model_name}"
+        } for idx, model_name in enumerate(managed_models)]
 
 def get_default_model():
     """
@@ -2408,213 +2448,226 @@ def test_ollama():
 
 # Main entry point
 def initialize_rbac_data():
-    app.logger.info("FUNC_INIT_RBAC: Entered initialize_rbac_data function.") # Cascade Temp Log
+    app.logger.info("FUNC_INIT_RBAC: Entered initialize_rbac_data function.")
     """
     Initializes default roles and populates the Model table
     from available Ollama models if they don't already exist.
     Also assigns all found models to the 'admin' role.
     """
-    with app.app_context():
-        app.logger.info("FUNC_INIT_RBAC: Attempting to process roles and models...") # Cascade Temp Log (was: Initializing RBAC data (roles and models)...)
-
-        # 1. Create default roles
-        default_roles_data = {
-            "admin": "Administrator with full access to all models and system settings.",
-            "user": "Standard user with access to a default set of models."
-        }
-        admin_role_obj = None
-        user_role_obj = None
-
-        for role_name, role_desc in default_roles_data.items():
-            role = Role.query.filter_by(name=role_name).first()
-            if not role:
-                role = Role(name=role_name, description=role_desc)
-                db.session.add(role)
-                app.logger.info(f"Created role: {role_name}")
-            if role_name == "admin":
-                admin_role_obj = role
-            elif role_name == "user":
-                user_role_obj = role
+    # Skip RBAC initialization if database isn't ready
+    if not app.config.get('DATABASE_INITIALIZED', False):
+        app.logger.warning("Skipping RBAC data initialization as database tables are not fully ready")
+        app.logger.info(f"Managed models from config: {app.config.get('MANAGED_OLLAMA_MODELS', [])}")
+        return
         
-        try:
-            db.session.commit() # Commit roles first
-        except Exception as e:
-            db.session.rollback()
-            app.logger.error(f"Error committing roles: {e}", exc_info=True)
-            return # Cannot proceed without roles
+    # Proceed with initialization if database is ready
+    try:
+        with app.app_context():
+            app.logger.info("FUNC_INIT_RBAC: Attempting to process roles and models...") # Cascade Temp Log (was: Initializing RBAC data (roles and models)...)
 
-        if not admin_role_obj:
-            app.logger.error("Admin role could not be found or created. Cannot proceed.")
-            return
+            # 1. Create default roles
+            default_roles_data = {
+                "admin": "Administrator with full access to all models and system settings.",
+                "user": "Standard user with access to a default set of models."
+            }
+            admin_role_obj = None
+            user_role_obj = None
 
-        # 2. Create and assign 'Admin' role to the default admin user (admin@admin.com)
-        default_admin_email = "admin@admin.com"
-        admin_user_obj = User.query.filter_by(email=default_admin_email).first()
-        if not admin_user_obj:
-            app.logger.info(f"Default admin user '{default_admin_email}' not found. Creating new admin user.")
-            hashed_password = generate_password_hash("admin")
-            admin_user_obj = User(
-                username="admin",
-                email=default_admin_email,
-                firstname="admin",
-                lastname="admin",
-                password_hash=hashed_password,
-                confirmed=True, 
-                is_active=True
-            )
-            db.session.add(admin_user_obj)
+            for role_name, role_desc in default_roles_data.items():
+                role = Role.query.filter_by(name=role_name).first()
+                if not role:
+                    role = Role(name=role_name, description=role_desc)
+                    db.session.add(role)
+                    app.logger.info(f"Created role: {role_name}")
+                if role_name == "admin":
+                    admin_role_obj = role
+                elif role_name == "user":
+                    user_role_obj = role
+            
+            try:
+                db.session.commit() # Commit roles first
+            except Exception as e:
+                db.session.rollback()
+                app.logger.error(f"Error committing roles: {e}", exc_info=True)
+                return # Cannot proceed without roles
+
+            if not admin_role_obj:
+                app.logger.error("Admin role could not be found or created. Cannot proceed.")
+                return
+
+            # 2. Create and assign 'Admin' role to the default admin user (admin@admin.com)
+            default_admin_email = "admin@admin.com"
+            admin_user_obj = User.query.filter_by(email=default_admin_email).first()
+            if not admin_user_obj:
+                app.logger.info(f"Default admin user '{default_admin_email}' not found. Creating new admin user.")
+                hashed_password = generate_password_hash("admin")
+                admin_user_obj = User(
+                    username="admin",
+                    email=default_admin_email,
+                    firstname="admin",
+                    lastname="admin",
+                    password_hash=hashed_password,
+                    confirmed=True, 
+                    is_active=True
+                )
+                db.session.add(admin_user_obj)
             try:
                 db.session.commit() # Commit new admin user first
-                app.logger.info(f"Successfully created default admin user '{default_admin_email}'.")
+                app.logger.info(f"Successfully created default admin user '{default_admin_email}'.") 
             except Exception as e:
                 db.session.rollback()
                 app.logger.error(f"Error creating default admin user '{default_admin_email}': {e}", exc_info=True)
                 # Don't return, try to proceed with other admin if configured
-        
-        # Ensure the default admin user is active if they exist
-        if admin_user_obj and not admin_user_obj.is_active:
-            app.logger.info(f"Ensuring default admin user '{default_admin_email}' is active.")
-            admin_user_obj.is_active = True
-            # Commit this change before proceeding with role assignment
-            try:
-                db.session.commit()
-                app.logger.info(f"Default admin user '{default_admin_email}' set to active.")
-            except Exception as e:
-                db.session.rollback()
-                app.logger.error(f"Error setting default admin user '{default_admin_email}' to active: {e}", exc_info=True)
-
-        # Assign Admin role to the default admin user if they exist and don't have it
-        if admin_user_obj and admin_role_obj not in admin_user_obj.roles:
-            admin_user_obj.roles.append(admin_role_obj)
-            try:
-                db.session.commit()
-                app.logger.info(f"Assigned 'admin' role to default admin user '{default_admin_email}'.")
-            except Exception as e:
-                db.session.rollback()
-                app.logger.error(f"Error assigning 'admin' role to default admin user '{default_admin_email}': {e}", exc_info=True)
-        elif admin_user_obj:
-            app.logger.info(f"Default admin user '{default_admin_email}' already has 'admin' role or was just created with it.")
-
-        # 3. Assign 'Admin' role to the admin user from .env (if different from default and exists)
-        admin_username_env = app.config.get('ADMIN_USERNAME')
-        if admin_username_env and admin_username_env != "admin": # Check if .env admin is set and different from default 'admin'
-            env_admin_user = User.query.filter_by(username=admin_username_env).first()
-            if env_admin_user:
-                if admin_role_obj not in env_admin_user.roles:
-                    env_admin_user.roles.append(admin_role_obj)
-                    try:
-                        db.session.commit()
-                        app.logger.info(f"Assigned 'admin' role to .env admin user '{admin_username_env}'.")
-                    except Exception as e:
-                        db.session.rollback()
-                        app.logger.error(f"Error assigning 'admin' role to .env admin user '{admin_username_env}': {e}", exc_info=True)
-                else:
-                    app.logger.info(f".env admin user '{admin_username_env}' already has 'admin' role.")
-            else:
-                app.logger.warning(f"Admin user '{admin_username_env}' specified in .env not found in database. Cannot assign 'admin' role.")
-        elif not admin_username_env:
-            app.logger.info("ADMIN_USERNAME not set in .env file. Skipping .env admin role assignment.")
-        elif admin_username_env == "admin":
-            app.logger.info("ADMIN_USERNAME in .env is 'admin', which is already handled as the default admin. Skipping redundant assignment.")
-
-        # 3. Populate Model table from MANAGED_OLLAMA_MODELS and assign to admin
-        app.logger.info("Processing managed models for Model table and admin assignment...")
-        
-        admin_models_assigned_this_run = [] # To track models assigned to admin in this run
-        llm_service_type = app.config.get('LLM_SERVICE_TYPE', 'ollama').lower()
-
-
-        if llm_service_type == 'ollama':
-            managed_ollama_models_from_config = app.config.get('MANAGED_OLLAMA_MODELS', [])
-            if not managed_ollama_models_from_config:
-                app.logger.warning("No managed Ollama models found in app.config (MANAGED_OLLAMA_MODELS is empty or not set). "
-                               "Model table population from this list will be skipped.")
             
-            for ollama_model_name in managed_ollama_models_from_config:
-                model = Model.query.filter_by(ollama_model_name=ollama_model_name).first()
-                if not model:
-                    # Attempt to create a somewhat friendly display name
-                    display_parts = ollama_model_name.split(':')[0].replace('-', ' ').replace('_', ' ')
-                    display_name_generated = ' '.join(word.capitalize() for word in display_parts.split(' '))
-                    tag_suffix = ""
-                    if ':' in ollama_model_name:
-                        tag = ollama_model_name.split(':')[-1]
-                        if tag.lower() != 'latest':
-                             tag_suffix = f" ({tag.capitalize()})"
-                        # else: # For 'latest', no specific tag suffix or a generic one like "(Latest)"
-                             # tag_suffix = " (Latest)" # Optional: if you want to explicitly mark 'latest'
-                    final_display_name = display_name_generated + tag_suffix
+            # Ensure the default admin user is active if they exist
+            if admin_user_obj and not admin_user_obj.is_active:
+                app.logger.info(f"Ensuring default admin user '{default_admin_email}' is active.")
+                admin_user_obj.is_active = True
+                # Commit this change before proceeding with role assignment
+                try:
+                    db.session.commit()
+                    app.logger.info(f"Default admin user '{default_admin_email}' set to active.")
+                except Exception as e:
+                    db.session.rollback()
+                    app.logger.error(f"Error setting default admin user '{default_admin_email}' to active: {e}", exc_info=True)
 
-                    model = Model(
-                        display_name=final_display_name, # This is the user-facing name
-                        ollama_model_name=ollama_model_name, # This is for Ollama API
-                        description=f"Ollama model: {ollama_model_name}",
-                        is_active=True # Managed models are active by default
-                    )
-                    db.session.add(model)
-                    app.logger.info(f"Created new Model DB entry for managed model: {ollama_model_name} (Display: {final_display_name})")
-                    try:
-                        db.session.commit() # Commit each new model to get its ID for relationships
-                    except Exception as e:
-                        db.session.rollback()
-                        app.logger.error(f"Error committing new model {ollama_model_name}: {e}", exc_info=True)
-                        continue # Skip to next model
-                elif not model.is_active:
-                    app.logger.info(f"Model '{ollama_model_name}' found in DB but was inactive. Activating it as it's a managed model.")
-                    model.is_active = True
-                    # No immediate commit needed here, will be committed with role assignment or at the end of this section.
+            # Assign Admin role to the default admin user if they exist and don't have it
+            if admin_user_obj and admin_role_obj not in admin_user_obj.roles:
+                admin_user_obj.roles.append(admin_role_obj)
+                try:
+                    db.session.commit()
+                    app.logger.info(f"Assigned 'admin' role to default admin user '{default_admin_email}'.") 
+                except Exception as e:
+                    db.session.rollback()
+                    app.logger.error(f"Error assigning 'admin' role to default admin user '{default_admin_email}': {e}", exc_info=True)
+            elif admin_user_obj:
+                app.logger.info(f"Default admin user '{default_admin_email}' already has 'admin' role or was just created with it.")
 
-                # Assign to admin role if not already assigned and model object exists
-                if admin_role_obj and model and model.id is not None: # Ensure model is committed or fetched with an ID
-                    if model not in admin_role_obj.models:
-                        admin_role_obj.models.append(model)
-                        admin_models_assigned_this_run.append(model.display_name)
-                        app.logger.info(f"Assigned model '{model.display_name}' to 'admin' role.")
-                elif not model:
-                    app.logger.warning(f"Skipped assigning model {ollama_model_name} to admin as model object was None (likely due to creation error).")
-        
-        elif llm_service_type == 'llamacpp':
-            app.logger.info("LLM service is LlamaCPP. Checking/creating DB entry for its default model.")
-            llamacpp_default_model_name = app.config.get('EFFECTIVE_DEFAULT_MODEL_NAME')
-            if llamacpp_default_model_name:
-                model = Model.query.filter_by(ollama_model_name=llamacpp_default_model_name).first()
-                if not model:
-                    model = Model(
-                        display_name=llamacpp_default_model_name, 
-                        ollama_model_name=llamacpp_default_model_name, # Using ollama_model_name field for identifier consistency
-                        description=f"LlamaCPP model: {llamacpp_default_model_name}",
-                        is_active=True
-                    )
-                    db.session.add(model)
-                    app.logger.info(f"Created new Model DB entry for LlamaCPP default model: {llamacpp_default_model_name}")
-                    try:
-                        db.session.commit() # Commit to get ID
-                    except Exception as e:
-                        db.session.rollback()
-                        app.logger.error(f"Error committing LlamaCPP default model {llamacpp_default_model_name} to DB: {e}", exc_info=True)
-                        model = None # Ensure model is None if commit failed
+            # 3. Assign 'Admin' role to the admin user from .env (if different from default and exists)
+            admin_username_env = app.config.get('ADMIN_USERNAME')
+            if admin_username_env and admin_username_env != "admin": # Check if .env admin is set and different from default 'admin'
+                env_admin_user = User.query.filter_by(username=admin_username_env).first()
+                if env_admin_user:
+                    if admin_role_obj not in env_admin_user.roles:
+                        env_admin_user.roles.append(admin_role_obj)
+                        try:
+                            db.session.commit()
+                            app.logger.info(f"Assigned 'admin' role to .env admin user '{admin_username_env}'.") 
+                        except Exception as e:
+                            db.session.rollback()
+                            app.logger.error(f"Error assigning 'admin' role to .env admin user '{admin_username_env}': {e}", exc_info=True)
+                    else:
+                        app.logger.info(f".env admin user '{admin_username_env}' already has 'admin' role.")
+                else:
+                    app.logger.warning(f"Admin user '{admin_username_env}' specified in .env not found in database. Cannot assign 'admin' role.")
+            elif not admin_username_env:
+                app.logger.info("ADMIN_USERNAME not set in .env file. Skipping .env admin role assignment.")
+            elif admin_username_env == "admin":
+                app.logger.info("ADMIN_USERNAME in .env is 'admin', which is already handled as the default admin. Skipping redundant assignment.")
+
+            # 4. Populate Model table from MANAGED_OLLAMA_MODELS and assign to admin
+            app.logger.info("Processing managed models for Model table and admin assignment...")
+            
+            admin_models_assigned_this_run = [] # To track models assigned to admin in this run
+            llm_service_type = app.config.get('LLM_SERVICE_TYPE', 'ollama').lower()
+
+
+            if llm_service_type == 'ollama':
+                managed_ollama_models_from_config = app.config.get('MANAGED_OLLAMA_MODELS', [])
+                if not managed_ollama_models_from_config:
+                    app.logger.warning("No managed Ollama models found in app.config (MANAGED_OLLAMA_MODELS is empty or not set). "
+                                   "Model table population from this list will be skipped.")
                 
-                if admin_role_obj and model and model.id is not None:
-                    if model not in admin_role_obj.models:
-                        admin_role_obj.models.append(model)
-                        admin_models_assigned_this_run.append(model.display_name) # CORRECTED HERE
-                        app.logger.info(f"Assigned LlamaCPP model '{model.display_name}' to 'admin' role.") # Also ensure log uses display_name
+                for ollama_model_name in managed_ollama_models_from_config:
+                    model = Model.query.filter_by(ollama_model_name=ollama_model_name).first()
+                    if not model:
+                        # Attempt to create a somewhat friendly display name
+                        display_parts = ollama_model_name.split(':')[0].replace('-', ' ').replace('_', ' ')
+                        display_name_generated = ' '.join(word.capitalize() for word in display_parts.split(' '))
+                        tag_suffix = ""
+                        if ':' in ollama_model_name:
+                            tag = ollama_model_name.split(':')[-1]
+                            if tag.lower() != 'latest':
+                                 tag_suffix = f" ({tag.capitalize()})"
+                            # else: # For 'latest', no specific tag suffix or a generic one like "(Latest)"
+                                 # tag_suffix = " (Latest)" # Optional: if you want to explicitly mark 'latest'
+                        final_display_name = display_name_generated + tag_suffix
+
+                        model = Model(
+                            display_name=final_display_name, # This is the user-facing name
+                            ollama_model_name=ollama_model_name, # This is for Ollama API
+                            description=f"Ollama model: {ollama_model_name}",
+                            is_active=True # Managed models are active by default
+                        )
+                        db.session.add(model)
+                        app.logger.info(f"Created new Model DB entry for managed model: {ollama_model_name} (Display: {final_display_name})")
+                        try:
+                            db.session.commit() # Commit each new model to get its ID for relationships
+                        except Exception as e:
+                            db.session.rollback()
+                            app.logger.error(f"Error committing new model {ollama_model_name}: {e}", exc_info=True)
+                            continue # Skip to next model
+                    elif not model.is_active:
+                        app.logger.info(f"Model '{ollama_model_name}' found in DB but was inactive. Activating it as it's a managed model.")
+                        model.is_active = True
+                        # No immediate commit needed here, will be committed with role assignment or at the end of this section.
+
+                    # Assign to admin role if not already assigned and model object exists
+                    if admin_role_obj and model and model.id is not None: # Ensure model is committed or fetched with an ID
+                        if model not in admin_role_obj.models:
+                            admin_role_obj.models.append(model)
+                            admin_models_assigned_this_run.append(model.display_name)
+                            app.logger.info(f"Assigned model '{model.display_name}' to 'admin' role.")
+                    elif not model:
+                        app.logger.warning(f"Skipped assigning model {ollama_model_name} to admin as model object was None (likely due to creation error).")
+
+            
+            elif llm_service_type == 'llamacpp':
+                app.logger.info("LLM service is LlamaCPP. Checking/creating DB entry for its default model.")
+                llamacpp_default_model_name = app.config.get('EFFECTIVE_DEFAULT_MODEL_NAME')
+                if llamacpp_default_model_name:
+                    model = Model.query.filter_by(ollama_model_name=llamacpp_default_model_name).first()
+                    if not model:
+                        model = Model(
+                            display_name=llamacpp_default_model_name, 
+                            ollama_model_name=llamacpp_default_model_name, # Using ollama_model_name field for identifier consistency
+                            description=f"LlamaCPP model: {llamacpp_default_model_name}",
+                            is_active=True
+                        )
+                        db.session.add(model)
+                        app.logger.info(f"Created new Model DB entry for LlamaCPP default model: {llamacpp_default_model_name}")
+                        try:
+                            db.session.commit() # Commit to get ID
+                        except Exception as e:
+                            db.session.rollback()
+                            app.logger.error(f"Error committing LlamaCPP default model {llamacpp_default_model_name} to DB: {e}", exc_info=True)
+                            model = None # Ensure model is None if commit failed
+                    
+                    if admin_role_obj and model and model.id is not None:
+                        if model not in admin_role_obj.models:
+                            admin_role_obj.models.append(model)
+                            admin_models_assigned_this_run.append(model.display_name) # CORRECTED HERE
+                            app.logger.info(f"Assigned LlamaCPP model '{model.display_name}' to 'admin' role.") # Also ensure log uses display_name
+                else:
+                    app.logger.warning("LlamaCPP service type, but no EFFECTIVE_DEFAULT_MODEL_NAME found in app.config.")
             else:
-                app.logger.warning("LlamaCPP service type, but no EFFECTIVE_DEFAULT_MODEL_NAME found in app.config.")
-        else:
-            app.logger.info(f"LLM service type is '{llm_service_type}'. Model DB population from managed list is primarily for Ollama.")
+                app.logger.info(f"LLM service type is '{llm_service_type}'. Model DB population from managed list is primarily for Ollama.")
 
-        if admin_models_assigned_this_run:
-            app.logger.info(f"Models assigned/confirmed for admin role in this initialization run: {', '.join(admin_models_assigned_this_run)}")
+            if admin_models_assigned_this_run:
+                app.logger.info(f"Models assigned/confirmed for admin role in this initialization run: {', '.join(admin_models_assigned_this_run)}")
 
-        try:
-            db.session.commit() # Commit all changes (new models, model activations, role assignments)
-            app.logger.info("Committed all model and admin role assignment changes for initialize_rbac_data.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.error(f"Final commit in initialize_rbac_data failed: {e}", exc_info=True)
+            try:
+                db.session.commit() # Commit all changes (new models, model activations, role assignments)
+                app.logger.info("Committed all model and admin role assignment changes for initialize_rbac_data.")
+            except Exception as e:
+                db.session.rollback()
+                app.logger.error(f"Final commit in initialize_rbac_data failed: {e}", exc_info=True)
 
-        app.logger.info("FUNC_INIT_RBAC: Exiting initialize_rbac_data function.") # Cascade Temp Logn managed/default models complete.")
+            app.logger.info("FUNC_INIT_RBAC: Exiting initialize_rbac_data function.")
+    except Exception as e:
+        app.logger.error(f"Error in initialize_rbac_data: {str(e)}")
+        # Set the flag in app config to indicate database is not fully initialized
+        app.config['DATABASE_INITIALIZED'] = False
 # ===========================
 @app.route('/admin/rag')
 @login_required
@@ -2628,8 +2681,18 @@ def admin_rag_page():
     documents = RagDocument.query.order_by(RagDocument.uploaded_at.desc()).all()
     documents_json = json.dumps([{'id': doc.id, 'filename': doc.filename} for doc in documents])
     
-    embedding_models_str = os.getenv('OLLAMA_EMBEDDING_MODELS', 'nomic-embed-text')
-    available_embedding_models = [model.strip() for model in embedding_models_str.split(',')]
+    # Get Ollama models for embeddings
+    ollama_models = app.config.get('MANAGED_OLLAMA_MODELS', [])
+    if not ollama_models and 'OLLAMA_MODELS' in os.environ:
+        # Fallback to env var if app.config doesn't have the models
+        ollama_models = [model.strip() for model in os.environ.get('OLLAMA_MODELS').split(',')]
+    
+    # Add 'ollama/' prefix to all models to match the format expected by the embedding function
+    available_embedding_models = [f"ollama/{model}" for model in ollama_models]
+    
+    # If no models available, add a default one
+    if not available_embedding_models:
+        available_embedding_models = ['ollama/tinyllama:1.1b-chat-v1-q2_K']
     return render_template('admin_rag.html', indexes=indexes, base_models=base_models, available_embedding_models=available_embedding_models, documents=documents, documents_json=documents_json)
 
 @app.route('/admin/rag/index/create', methods=['POST'])
@@ -3592,7 +3655,7 @@ if __name__ == '__main__':
     # Initialize database and apply migrations
     try:
         app.logger.info("Initializing database...")
-        init_database()
+        init_db()
         app.logger.info("Database initialization completed successfully")
     except Exception as e:
         app.logger.error(f"Failed to initialize database: {str(e)}")
