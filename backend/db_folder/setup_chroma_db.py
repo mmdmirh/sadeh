@@ -76,8 +76,8 @@ def create_databases():
         if use_root:
             print(f"Ensuring user '{db_user}' exists and has proper permissions")
             cursor.execute(f"CREATE USER IF NOT EXISTS '{db_user}'@'%' IDENTIFIED BY '{db_password}'")
-            cursor.execute(f"GRANT ALL PRIVILEGES ON {app_db}.* TO '{db_user}'@'%'")
-            cursor.execute(f"GRANT ALL PRIVILEGES ON {chroma_db}.* TO '{db_user}'@'%'")
+            cursor.execute(f"GRANT ALL PRIVILEGES ON {app_db}.* TO '{db_user}'@'%' ")
+            cursor.execute(f"GRANT ALL PRIVILEGES ON {chroma_db}.* TO '{db_user}'@'%' ")
             cursor.execute("FLUSH PRIVILEGES")
         
         conn.commit()

@@ -61,6 +61,7 @@ if [ -f deploy/.env ]; then
         echo "Embedding models configured: $OLLAMA_EMBEDDING_MODELS"
     fi
     set +a
+    export SQLALCHEMY_DATABASE_URI="mysql+pymysql://$MYSQL_USER:$MYSQL_PASSWORD@$MYSQL_HOST:$MYSQL_PORT/$MYSQL_DATABASE"
 else
     echo "Warning: deploy/.env file not found. Please create it from deploy/.env.example."
     # Set default fallbacks if .env is missing
@@ -69,9 +70,6 @@ else
     export MYSQL_DATABASE=sadeh_db
     export CHROMA_DB_DATABASE=chroma_db
 fi
-
-echo "=== Applying Database Migrations ==="
-flask db upgrade
 
 # --- Override hosts for local execution --- #
 echo "Overriding hosts for local execution..."
@@ -99,14 +97,48 @@ echo "- CHROMA_DB_HOST: $CHROMA_DB_HOST"
 echo "- CHROMA_DB_PORT: $CHROMA_DB_PORT"
 echo "- CHROMA_DB_DATABASE: $CHROMA_DB_DATABASE"
 
+echo "=== Database Setup (Running Migrations) ==="
+export FLASK_APP=backend.sadeh_core.app
+
+# Check if the database exists, if not create it but don't reset it
+python -c "
+import pymysql
+try:
+    connection = pymysql.connect(
+        host='$MYSQL_HOST',
+        port=$MYSQL_PORT,
+        user='$MYSQL_USER',
+        password='$MYSQL_PASSWORD'
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(\"SHOW DATABASES LIKE '$MYSQL_DATABASE'\")
+        result = cursor.fetchone()
+        if not result:
+            print('Creating database $MYSQL_DATABASE because it does not exist')
+            cursor.execute(\"CREATE DATABASE \`$MYSQL_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci\")
+            print('Database created successfully')
+        else:
+            print('Database $MYSQL_DATABASE already exists, preserving data')
+except Exception as e:
+    print(f'Error checking/creating database: {e}')
+    exit(1)
+"
+
+# Create RAG directories if they don't exist (without deleting existing content)
+echo "=== Ensuring RAG Directories Exist ==="
+mkdir -p backend/sadeh_core/rag_documents
+mkdir -p backend/sadeh_core/rag_indices
+echo "RAG directories checked."
+
+# Run migrations to update database schema
+echo "Running database migrations to apply any schema changes..."
+flask db upgrade
+
 echo "Connecting as user: $CHROMA_DB_USER"
 echo "With password: $CHROMA_DB_PASSWORD"
 
-echo "=== Installing/Updating Python Dependencies ==="
-# pip install --no-cache-dir -q -r requirements.txt
-
 echo "=== Setting up MySQL Databases (if needed) ==="
-python scripts/setup_chroma_db.py
+python backend/db_folder/setup_chroma_db.py
 
 echo "=== Waiting for MySQL to be ready ==="
 # Wait for MySQL to be ready
@@ -119,16 +151,43 @@ for i in {1..30}; do
     sleep 2
 done
 
-echo "=== Creating Database Tables ==="
-flask db upgrade
+# Initialize the database with default data ONLY if needed
+echo "=== Checking if database initialization is needed ==="
+python -c "
+import pymysql
+import sys
+try:
+    connection = pymysql.connect(
+        host='$MYSQL_HOST',
+        port=$MYSQL_PORT,
+        user='$MYSQL_USER',
+        password='$MYSQL_PASSWORD',
+        database='$MYSQL_DATABASE'
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(\"SELECT COUNT(*) FROM user\")
+        result = cursor.fetchone()
+        if result[0] == 0:
+            print('No users found, database needs initialization')
+            sys.exit(1)  # Exit with error to trigger initialization
+        else:
+            print(f'Found {result[0]} users, database already initialized')
+            sys.exit(0)  # Exit with success to skip initialization
+except Exception as e:
+    print(f'Error checking database: {e}')
+    sys.exit(1)  # Exit with error to trigger initialization
+"
 
-# Initialize the database with default data
-echo "=== Initializing Database with Default Data ==="
-flask init-db
+if [ $? -ne 0 ]; then
+    echo "=== Initializing Database with Default Data ==="
+    flask init-db
+else
+    echo "=== Database already initialized, skipping init-db ==="
+fi
 
 # Kill any existing process on port 5001 to prevent 'Address already in use' error
 echo "=== Ensuring port 5001 is free ==="
 lsof -ti:5001 | xargs -r kill -9
 
 echo "=== Starting Sadeh Application on http://0.0.0.0:5001 ==="
-gunicorn --bind 0.0.0.0:5001 --timeout 180 --workers 2 --threads 4 --access-logfile sadeh_app.log --error-logfile sadeh_app.log app:app
+gunicorn --bind 0.0.0.0:5001 --timeout 180 --workers 2 --threads 4 --access-logfile - --error-logfile - backend.sadeh_core.app:app
