@@ -44,3 +44,5 @@ packages/
 # RAG data and indexes
 rag_documents/
 rag_indexes/
+rag_indexes/
+*/rag_indexes/
