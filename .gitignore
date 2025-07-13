@@ -1,48 +1,56 @@
-# Byte-compiled / optimized / DLL files
-*.pyc
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Environment variables file
-.env
-deploy/.env
-
-# IDE and editor files
-.idea/
-*.iml
-
-# Virtual environment folders
+# Virtual environments
 venv/
+ENV/
 env/
-.venv/
 
-# System files
-.DS_Store
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Log files
+# Flask
+instance/
+.webassets-cache
+
+# Database
+*.db
+*.sqlite
+
+# RAG Indexes - these files are large and can be regenerated
+rag_indexes/
+rag_documents/
+*/rag_indexes/
+**/rag_indexes/**
+**/sadeh_core/rag_indexes/**
+
+
+# Logs
+logs/
 *.log
 
-# Temporary files
-*.tmp
-tmp/
-
-# Build directories
-build/
-dist/
-
-# Docker override and temporary files
-docker-compose.override.yml
-
-# Downloaded packages folder (for offline installations)
-packages/
-
-# Converted audio files
-*.converted.wav
-
-# SQL temporary files
-*.sql~
-
-# RAG data and indexes
-rag_documents/
-rag_indexes/
-rag_indexes/
-*/rag_indexes/
+# OS specific
+.DS_Store
+Thumbs.db
