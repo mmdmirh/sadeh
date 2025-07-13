@@ -40,7 +40,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama-models:/root/.ollama
+      - /root/chatbot-backend/ollama-models:/root/.ollama
       - ./ollama_config/ollama_entrypoint.sh:/app/ollama_entrypoint.sh
     restart: unless-stopped
     entrypoint: ["/app/ollama_entrypoint.sh"]
@@ -86,4 +86,4 @@ services:
 
 volumes:
   mysql-data:
-  ollama-models:
+  #ollama-models:
