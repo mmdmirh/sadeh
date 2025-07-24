@@ -1,0 +1,1380 @@
+openapi: 3.0.3
+info:
+  title: Sadeh API
+  description: |
+    API documentation for Sadeh, an AI assistant application with chat, voice, and document processing capabilities.
+    
+    This API allows you to interact with AI models, manage conversations, handle user authentication, and administer the application.
+  version: 1.0.0
+servers:
+  - url: 'http://localhost:5001'
+    description: Local development server
+  - url: 'https://api.sadeh.com'
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User authentication and account management
+  - name: Conversations
+    description: Managing chat conversations
+  - name: AI Models
+    description: Interacting with AI models
+  - name: Documents
+    description: Document upload and management
+  - name: Voice
+    description: Voice recording and synthesis
+  - name: RAG
+    description: Retrieval-Augmented Generation features
+  - name: Admin
+    description: Administrative functions
+
+paths:
+  /:
+    get:
+      summary: Landing page
+      description: Main landing page for the application
+      tags:
+        - Authentication
+      responses:
+        '200':
+          description: Login page or redirect to chat page if already authenticated
+        '302':
+          description: Redirect to chat page
+    post:
+      summary: Login
+      description: User login submission
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                remember_me:
+                  type: boolean
+              required:
+                - email
+                - password
+      responses:
+        '200':
+          description: Login page with error message
+        '302':
+          description: Redirect to chat page on successful login
+  
+  /ping:
+    get:
+      summary: Health check
+      description: Check if the application is running
+      tags:
+        - Authentication
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: 'ok'
+    head:
+      summary: Health check (HEAD)
+      description: Check if the application is running using HEAD request
+      tags:
+        - Authentication
+      responses:
+        '200':
+          description: Server is running
+  
+  /confirm/{token}:
+    get:
+      summary: Confirm account
+      description: Confirm a user account using a token sent via email
+      tags:
+        - Authentication
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Account confirmation page
+        '302':
+          description: Redirect to login page
+  
+  /logout:
+    get:
+      summary: Logout
+      description: Log out the current user
+      tags:
+        - Authentication
+      responses:
+        '302':
+          description: Redirect to login page
+  
+  /reset:
+    get:
+      summary: Password reset request form
+      description: Show the form to request a password reset
+      tags:
+        - Authentication
+      responses:
+        '200':
+          description: Password reset request form
+    post:
+      summary: Submit password reset request
+      description: Submit an email address to receive a password reset link
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+              required:
+                - email
+      responses:
+        '200':
+          description: Password reset request confirmation
+        '302':
+          description: Redirect to login page
+  
+  /reset_password/{token}:
+    get:
+      summary: Password reset form
+      description: Show the form to reset password using a token
+      tags:
+        - Authentication
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Password reset form
+    post:
+      summary: Submit password reset
+      description: Submit a new password
+      tags:
+        - Authentication
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  format: password
+                password_confirm:
+                  type: string
+                  format: password
+              required:
+                - password
+                - password_confirm
+      responses:
+        '200':
+          description: Password reset form with errors
+        '302':
+          description: Redirect to login page on successful password reset
+
+  /chat:
+    get:
+      summary: Chat interface
+      description: Show the chat interface for conversations with AI models
+      tags:
+        - Conversations
+      responses:
+        '200':
+          description: Chat interface
+        '302':
+          description: Redirect to login page if not authenticated
+    post:
+      summary: Submit message
+      description: Submit a message in a chat conversation
+      tags:
+        - Conversations
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                conversation_id:
+                  type: integer
+                  description: ID of the conversation
+                message:
+                  type: string
+                  description: Message content
+              required:
+                - conversation_id
+                - message
+      responses:
+        '200':
+          description: Chat interface with new message
+        '302':
+          description: Redirect to login page if not authenticated
+  
+  /conversation/new:
+    post:
+      summary: Create new conversation
+      description: Create a new chat conversation
+      tags:
+        - Conversations
+      responses:
+        '302':
+          description: Redirect to the new conversation
+        '403':
+          description: Unauthorized
+  
+  /conversation/{conversation_id}/rename:
+    post:
+      summary: Rename conversation
+      description: Change the title of a conversation
+      tags:
+        - Conversations
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: New conversation title
+              required:
+                - title
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+        '403':
+          description: Unauthorized
+  
+  /conversation/{conversation_id}/delete:
+    post:
+      summary: Delete conversation
+      description: Delete a conversation and all its messages
+      tags:
+        - Conversations
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '302':
+          description: Redirect to chat page
+        '403':
+          description: Unauthorized
+  
+  /conversation/{conversation_id}/update_title:
+    post:
+      summary: Update conversation title
+      description: Update the title of a conversation based on its content
+      tags:
+        - Conversations
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  title:
+                    type: string
+        '403':
+          description: Unauthorized
+
+  /edit_message/{message_id}:
+    post:
+      summary: Edit message
+      description: Edit a user message in a conversation
+      tags:
+        - Conversations
+      parameters:
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  description: New message content
+              required:
+                - content
+      responses:
+        '302':
+          description: Redirect to conversation
+        '403':
+          description: Unauthorized
+  
+  /call_model:
+    post:
+      summary: Call AI model
+      description: Send a message to the AI model and get a response
+      tags:
+        - AI Models
+        - Conversations
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                conversation_id:
+                  type: integer
+                  description: ID of the conversation
+                prompt:
+                  type: string
+                  description: Message to send to the AI model
+              required:
+                - conversation_id
+                - prompt
+      responses:
+        '200':
+          description: AI model response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message_id:
+                    type: integer
+                  content:
+                    type: string
+        '403':
+          description: Unauthorized
+  
+  /switch_model:
+    post:
+      summary: Switch AI model
+      description: Switch to a different AI model for a conversation
+      tags:
+        - AI Models
+        - Conversations
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                conversation_id:
+                  type: integer
+                  description: ID of the conversation
+                model_id:
+                  type: integer
+                  description: ID of the model to switch to
+              required:
+                - conversation_id
+                - model_id
+      responses:
+        '302':
+          description: Redirect to conversation
+        '403':
+          description: Unauthorized
+
+  /switch_llm_service:
+    post:
+      summary: Switch LLM service
+      description: Switch between different LLM services (e.g., Ollama, LLamaCPP)
+      tags:
+        - AI Models
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                service_type:
+                  type: string
+                  description: Type of LLM service (e.g., 'ollama', 'llamacpp')
+              required:
+                - service_type
+      responses:
+        '302':
+          description: Redirect to previous page
+        '403':
+          description: Unauthorized
+
+  /test_ollama:
+    get:
+      summary: Test Ollama connection
+      description: Test the connection to the Ollama service
+      tags:
+        - AI Models
+      responses:
+        '200':
+          description: Connection test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+        '403':
+          description: Unauthorized
+
+  /stop_response:
+    post:
+      summary: Stop AI response
+      description: Stop an ongoing AI model response
+      tags:
+        - AI Models
+        - Conversations
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                conversation_id:
+                  type: integer
+                  description: ID of the conversation
+              required:
+                - conversation_id
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '403':
+          description: Unauthorized
+
+  /upload_document:
+    post:
+      summary: Upload document
+      description: Upload a document to a conversation for context
+      tags:
+        - Documents
+        - Conversations
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Document file to upload
+                conversation_id:
+                  type: integer
+                  description: ID of the conversation
+              required:
+                - file
+                - conversation_id
+      responses:
+        '302':
+          description: Redirect to conversation
+        '403':
+          description: Unauthorized
+
+  /toggle_document_mode/{conversation_id}:
+    post:
+      summary: Toggle document mode
+      description: Toggle document mode for a conversation
+      tags:
+        - Documents
+        - Conversations
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  document_mode_enabled:
+                    type: boolean
+        '403':
+          description: Unauthorized
+
+  /upload_voice:
+    post:
+      summary: Upload voice recording
+      description: Upload a voice recording to a conversation
+      tags:
+        - Voice
+        - Conversations
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Voice recording file
+                conversation_id:
+                  type: integer
+                  description: ID of the conversation
+              required:
+                - file
+                - conversation_id
+      responses:
+        '302':
+          description: Redirect to conversation
+        '403':
+          description: Unauthorized
+
+  /voice_recording/{recording_id}:
+    get:
+      summary: Get voice recording
+      description: Retrieve a voice recording by ID
+      tags:
+        - Voice
+      parameters:
+        - name: recording_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Voice recording file
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Unauthorized
+        '404':
+          description: Recording not found
+
+  /voice_help:
+    get:
+      summary: Voice help
+      description: Display help information for voice features
+      tags:
+        - Voice
+      responses:
+        '200':
+          description: Voice help page
+
+  /voice_for_message/{message_id}:
+    get:
+      summary: Get voice for message
+      description: Get voice synthesis for a specific message
+      tags:
+        - Voice
+      parameters:
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Voice synthesis audio
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Unauthorized
+        '404':
+          description: Message not found
+
+  /synthesize_for_message:
+    post:
+      summary: Synthesize voice for message
+      description: Generate voice synthesis for a message
+      tags:
+        - Voice
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                message_id:
+                  type: integer
+                  description: ID of the message to synthesize
+              required:
+                - message_id
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '403':
+          description: Unauthorized
+
+  /api/rag_index/progress/{index_id}:
+    get:
+      summary: Get RAG index progress
+      description: Get the indexing progress for a RAG index
+      tags:
+        - RAG
+      parameters:
+        - name: index_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Index progress information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    description: Status of the indexing process
+                    enum: [pending, processing, completed, error]
+                  current_chunk:
+                    type: number
+                    description: Current progress percentage
+                  total_chunks:
+                    type: integer
+                    description: Total number of chunks (100 for percentage calculation)
+                  error_message:
+                    type: string
+                    description: Error message if status is error
+        '404':
+          description: Index not found
+
+  /admin/rag:
+    get:
+      summary: RAG admin page
+      description: Admin page for managing RAG indexes
+      tags:
+        - Admin
+        - RAG
+      responses:
+        '200':
+          description: RAG admin page
+        '403':
+          description: Unauthorized
+
+  /admin/rag/index/create:
+    post:
+      summary: Create RAG index
+      description: Create a new RAG index
+      tags:
+        - Admin
+        - RAG
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Name of the index
+                description:
+                  type: string
+                  description: Description of the index
+              required:
+                - name
+      responses:
+        '302':
+          description: Redirect to RAG admin page
+        '403':
+          description: Unauthorized
+
+  /admin/rag/index/delete:
+    post:
+      summary: Delete RAG index
+      description: Delete a RAG index
+      tags:
+        - Admin
+        - RAG
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                index_id:
+                  type: integer
+                  description: ID of the index to delete
+              required:
+                - index_id
+      responses:
+        '302':
+          description: Redirect to RAG admin page
+        '403':
+          description: Unauthorized
+
+  /admin/rag/document/upload:
+    post:
+      summary: Upload document to RAG index
+      description: Upload a document to a RAG index for processing
+      tags:
+        - Admin
+        - RAG
+        - Documents
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Document file to upload
+                index_id:
+                  type: integer
+                  description: ID of the RAG index
+              required:
+                - file
+                - index_id
+      responses:
+        '302':
+          description: Redirect to RAG admin page
+        '403':
+          description: Unauthorized
+
+  /admin/rag/index/{index_id}/documents:
+    get:
+      summary: Get RAG index documents
+      description: Get all documents in a RAG index
+      tags:
+        - Admin
+        - RAG
+        - Documents
+      parameters:
+        - name: index_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: RAG index documents
+        '403':
+          description: Unauthorized
+
+  /admin/rag/index/{index_id}/update_documents:
+    post:
+      summary: Update RAG index documents
+      description: Update the processing status of documents in a RAG index
+      tags:
+        - Admin
+        - RAG
+        - Documents
+      parameters:
+        - name: index_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                document_ids:
+                  type: array
+                  items:
+                    type: integer
+                  description: IDs of documents to update
+              required:
+                - document_ids
+      responses:
+        '302':
+          description: Redirect to RAG index documents page
+        '403':
+          description: Unauthorized
+
+  /admin/rbac:
+    get:
+      summary: Role-Based Access Control admin page
+      description: Admin page for managing user roles and permissions
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: RBAC admin page
+        '403':
+          description: Unauthorized
+
+  /admin/permissions/page_access/update:
+    post:
+      summary: Update page access permissions
+      description: Update which roles have access to which pages
+      tags:
+        - Admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                permissions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role_id:
+                        type: integer
+                      page_endpoint:
+                        type: string
+                    required:
+                      - role_id
+                      - page_endpoint
+              required:
+                - permissions
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "success"
+                  message:
+                    type: string
+        '400':
+          description: Bad request
+        '403':
+          description: Unauthorized
+
+  /admin/permissions/model_access/update:
+    post:
+      summary: Update model access permissions
+      description: Update which AI models are accessible to a specific role
+      tags:
+        - Admin
+        - AI Models
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role_id:
+                  type: integer
+                  description: ID of the role
+                model_ids:
+                  type: array
+                  items:
+                    type: integer
+                  description: IDs of models to grant access to
+              required:
+                - role_id
+                - model_ids
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "success"
+                  message:
+                    type: string
+        '400':
+          description: Bad request
+        '403':
+          description: Unauthorized
+
+  /admin/permissions/model_access/batch_update:
+    post:
+      summary: Batch update model access permissions
+      description: Update model access permissions for multiple roles at once
+      tags:
+        - Admin
+        - AI Models
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                permissions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role_id:
+                        type: integer
+                      model_ids:
+                        type: array
+                        items:
+                          type: integer
+                    required:
+                      - role_id
+                      - model_ids
+              required:
+                - permissions
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          description: Bad request
+        '403':
+          description: Unauthorized
+
+  /admin/models/rag/delete:
+    post:
+      summary: Delete RAG model
+      description: Delete a RAG model
+      tags:
+        - Admin
+        - RAG
+        - AI Models
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model_id:
+                  type: integer
+                  description: ID of the model to delete
+              required:
+                - model_id
+      responses:
+        '200':
+          description: Success response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          description: Bad request
+        '403':
+          description: Unauthorized
+
+  /admin/user/assign_roles/{user_id}:
+    post:
+      summary: Assign roles to user
+      description: Assign roles to a specific user
+      tags:
+        - Admin
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                role_ids:
+                  type: array
+                  items:
+                    type: integer
+                  description: IDs of roles to assign
+              required:
+                - role_ids
+      responses:
+        '302':
+          description: Redirect to RBAC admin page
+        '403':
+          description: Unauthorized
+
+  /admin/roles/create:
+    post:
+      summary: Create role
+      description: Create a new role
+      tags:
+        - Admin
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Role name
+                description:
+                  type: string
+                  description: Role description
+              required:
+                - name
+                - description
+      responses:
+        '302':
+          description: Redirect to RBAC admin page
+        '403':
+          description: Unauthorized
+
+  /admin/role/edit/{role_id}:
+    get:
+      summary: Edit role form
+      description: Display form to edit a role
+      tags:
+        - Admin
+      parameters:
+        - name: role_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Role edit form
+        '403':
+          description: Unauthorized
+    post:
+      summary: Update role
+      description: Update a role's name and description
+      tags:
+        - Admin
+      parameters:
+        - name: role_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Updated role name
+                description:
+                  type: string
+                  description: Updated role description
+              required:
+                - name
+                - description
+      responses:
+        '302':
+          description: Redirect to RBAC admin page
+        '403':
+          description: Unauthorized
+
+  /admin/users/create:
+    post:
+      summary: Create user
+      description: Create a new user
+      tags:
+        - Admin
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  description: Username
+                email:
+                  type: string
+                  format: email
+                  description: Email address
+                password:
+                  type: string
+                  format: password
+                  description: Password
+                password_confirm:
+                  type: string
+                  format: password
+                  description: Confirm password
+              required:
+                - username
+                - email
+                - password
+                - password_confirm
+      responses:
+        '302':
+          description: Redirect to RBAC admin page
+        '403':
+          description: Unauthorized
+
+  /admin/user/toggle_active/{user_id}:
+    post:
+      summary: Toggle user active status
+      description: Toggle whether a user account is active or inactive
+      tags:
+        - Admin
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '302':
+          description: Redirect to RBAC admin page
+        '403':
+          description: Unauthorized
+
+  /admin/user/update:
+    post:
+      summary: Update user
+      description: Update user information
+      tags:
+        - Admin
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: integer
+                  description: User ID
+                username:
+                  type: string
+                  description: Updated username
+                email:
+                  type: string
+                  format: email
+                  description: Updated email address
+              required:
+                - user_id
+                - username
+                - email
+      responses:
+        '302':
+          description: Redirect to RBAC admin page
+        '403':
+          description: Unauthorized
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        active:
+          type: boolean
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+    
+    Role:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+    
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        user_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        selected_model:
+          type: string
+        document_mode_enabled:
+          type: boolean
+    
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        sender:
+          type: string
+          enum: [user, assistant]
+        conversation_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    
+    Document:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        mime_type:
+          type: string
+        conversation_id:
+          type: integer
+    
+    VoiceRecording:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        conversation_id:
+          type: integer
+    
+    RagIndex:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        indexing_status:
+          type: string
+          enum: [pending, processing, completed, error]
+        indexing_progress:
+          type: number
+        indexing_error_message:
+          type: string
+    
+    Model:
+      type: object
+      properties:
+        id:
+          type: integer
+        ollama_model_name:
+          type: string
+        display_name:
+          type: string
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
