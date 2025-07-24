@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sadeh API Documentation</title>
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@4.5.0/swagger-ui.css" />
+  <link rel="icon" type="image/png" href="https://unpkg.com/swagger-ui-dist@4.5.0/favicon-32x32.png" sizes="32x32" />
+  <link rel="icon" type="image/png" href="https://unpkg.com/swagger-ui-dist@4.5.0/favicon-16x16.png" sizes="16x16" />
+  <style>
+    html {
+      box-sizing: border-box;
+      overflow: -moz-scrollbars-vertical;
+      overflow-y: scroll;
+    }
+    
+    *,
+    *:before,
+    *:after {
+      box-sizing: inherit;
+    }
+    
+    body {
+      margin: 0;
+      background: #fafafa;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="swagger-ui"></div>
+
+  <script src="https://unpkg.com/swagger-ui-dist@4.5.0/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@4.5.0/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = function() {
+      // Instead of loading from a file, use a variable with embedded spec
+      const spec = {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Sadeh API",
+          "description": "API documentation for Sadeh, an AI assistant application with chat, voice, and document processing capabilities.\n\nThis API allows you to interact with AI models, manage conversations, handle user authentication, and administer the application.",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://localhost:5001",
+            "description": "Local development server"
+          },
+          {
+            "url": "https://api.sadeh.com",
+            "description": "Production server"
+          }
+        ],
+        "tags": [
+          {
+            "name": "Authentication",
+            "description": "User authentication and account management"
+          },
+          {
+            "name": "Conversations",
+            "description": "Managing chat conversations"
+          },
+          {
+            "name": "AI Models",
+            "description": "Interacting with AI models"
+          },
+          {
+            "name": "Documents",
+            "description": "Document upload and management"
+          },
+          {
+            "name": "Voice",
+            "description": "Voice recording and synthesis"
+          },
+          {
+            "name": "RAG",
+            "description": "Retrieval-Augmented Generation features"
+          },
+          {
+            "name": "Admin",
+            "description": "Administrative functions"
+          }
+        ],
+        "paths": {
+          "/": {
+            "get": {
+              "summary": "Landing page",
+              "description": "Main landing page for the application",
+              "tags": ["Authentication"],
+              "responses": {
+                "200": {
+                  "description": "Login page or redirect to chat page if already authenticated"
+                },
+                "302": {
+                  "description": "Redirect to chat page"
+                }
+              }
+            },
+            "post": {
+              "summary": "Login",
+              "description": "User login submission",
+              "tags": ["Authentication"],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "username": {
+                          "type": "string",
+                          "description": "Username or email"
+                        },
+                        "password": {
+                          "type": "string",
+                          "format": "password",
+                          "description": "User password"
+                        },
+                        "remember": {
+                          "type": "boolean",
+                          "description": "Remember login"
+                        }
+                      },
+                      "required": ["username", "password"]
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "302": {
+                  "description": "Redirect to chat page on success or login page with errors"
+                }
+              }
+            }
+          },
+          "/login": {
+            "get": {
+              "summary": "Login page",
+              "description": "Display the login form",
+              "tags": ["Authentication"],
+              "responses": {
+                "200": {
+                  "description": "Login page"
+                },
+                "302": {
+                  "description": "Redirect to chat page if already authenticated"
+                }
+              }
+            }
+          },
+          "/confirm/{token}": {
+            "get": {
+              "summary": "Confirm account",
+              "description": "Confirm a user account with the provided token",
+              "tags": ["Authentication"],
+              "parameters": [
+                {
+                  "name": "token",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Account confirmation page"
+                },
+                "302": {
+                  "description": "Redirect to login page"
+                }
+              }
+            }
+          },
+          "/logout": {
+            "get": {
+              "summary": "Logout",
+              "description": "Log out the current user",
+              "tags": ["Authentication"],
+              "responses": {
+                "302": {
+                  "description": "Redirect to login page"
+                }
+              }
+            }
+          },
+          "/chat": {
+            "get": {
+              "summary": "Chat interface",
+              "description": "Show the chat interface for conversations with AI models",
+              "tags": ["Conversations"],
+              "responses": {
+                "200": {
+                  "description": "Chat interface"
+                },
+                "302": {
+                  "description": "Redirect to login page if not authenticated"
+                }
+              }
+            },
+            "post": {
+              "summary": "Submit message",
+              "description": "Submit a message in a chat conversation",
+              "tags": ["Conversations"],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "conversation_id": {
+                          "type": "integer",
+                          "description": "ID of the conversation"
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Message content"
+                        }
+                      },
+                      "required": ["conversation_id", "message"]
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Chat interface with new message"
+                },
+                "302": {
+                  "description": "Redirect to login page if not authenticated"
+                }
+              }
+            }
+          },
+          "/conversation/new": {
+            "post": {
+              "summary": "Create new conversation",
+              "description": "Create a new chat conversation",
+              "tags": ["Conversations"],
+              "responses": {
+                "302": {
+                  "description": "Redirect to the new conversation"
+                },
+                "403": {
+                  "description": "Unauthorized"
+                }
+              }
+            }
+          },
+          "/admin/rbac": {
+            "get": {
+              "summary": "Role-Based Access Control admin page",
+              "description": "Admin page for managing user roles and permissions",
+              "tags": ["Admin"],
+              "responses": {
+                "200": {
+                  "description": "RBAC admin page"
+                },
+                "403": {
+                  "description": "Unauthorized"
+                }
+              }
+            }
+          },
+          "/admin/permissions/page_access/update": {
+            "post": {
+              "summary": "Update page access permissions",
+              "description": "Update which roles have access to which pages",
+              "tags": ["Admin"],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "permissions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "role_id": {
+                                "type": "integer"
+                              },
+                              "page_endpoint": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["role_id", "page_endpoint"]
+                          }
+                        }
+                      },
+                      "required": ["permissions"]
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Success response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "example": "success"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "400": {
+                  "description": "Bad request"
+                },
+                "403": {
+                  "description": "Unauthorized"
+                }
+              }
+            }
+          },
+          "/admin/permissions/model_access/update": {
+            "post": {
+              "summary": "Update model access permissions",
+              "description": "Update which AI models are accessible to a specific role",
+              "tags": ["Admin", "AI Models"],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "role_id": {
+                          "type": "integer",
+                          "description": "ID of the role"
+                        },
+                        "model_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          },
+                          "description": "IDs of models to grant access to"
+                        }
+                      },
+                      "required": ["role_id", "model_ids"]
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Success response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "example": "success"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "400": {
+                  "description": "Bad request"
+                },
+                "403": {
+                  "description": "Unauthorized"
+                }
+              }
+            }
+          }
+        },
+        "components": {
+          "schemas": {
+            "User": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "username": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string",
+                  "format": "email"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Role"
+                  }
+                }
+              }
+            },
+            "Role": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      };
+      
+      const ui = SwaggerUIBundle({
+        spec: spec, // Use embedded spec instead of loading from a URL
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        layout: "StandaloneLayout"
+      });
+      window.ui = ui;
+    };
+  </script>
+</body>
+</html>
