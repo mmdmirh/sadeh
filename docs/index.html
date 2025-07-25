@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sadeh - AI Assistant Application</title>
+  <title>Sadeh - Advanced Conversational AI Assistant</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
@@ -147,35 +147,60 @@
   <header class="hero text-center">
     <div class="container">
       <h1>Sadeh AI Assistant</h1>
-      <p>A powerful AI assistant application with chat, voice, and document processing capabilities.</p>
+      <p class="lead mb-4">A secure, enterprise-ready conversational AI platform with advanced RAG capabilities, voice interaction, and comprehensive role-based access control.</p>
       <div class="mt-4">
-        <a href="#api-docs" class="btn btn-light btn-lg me-2">View API Documentation</a>
-        <a href="https://github.com/mmdmirh/sadeh" target="_blank" class="btn btn-outline-light btn-lg">GitHub Repository</a>
+        <a href="#installation" class="btn btn-light btn-lg me-2">Quick Install</a>
+        <a href="#api-docs" class="btn btn-outline-light btn-lg me-2">API Documentation</a>
+        <a href="https://github.com/mmdmirh/sadeh" target="_blank" class="btn btn-outline-light btn-lg">GitHub</a>
       </div>
     </div>
   </header>
 
   <!-- Installation Section -->
-  <section id="installation" class="py-5">
+  <section id="installation" class="py-5 bg-light">
     <div class="container">
-      <h2 class="text-center mb-5">Installation</h2>
-      <div class="row justify-content-center">
-        <div class="col-lg-8">
-          <div class="card shadow">
-            <div class="card-body p-4">
-              <h4 class="mb-3">Quick Install</h4>
-              <div class="bg-light p-3 rounded mb-3">
-                <code class="d-block mb-2">curl -s -o ~/sadeh_run.sh https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh</code>
-                <code class="d-block mb-2">chmod +x ~/sadeh_run.sh</code>
-                <code class="d-block">~/sadeh_run.sh</code>
+      <div class="row align-items-center">
+        <div class="col-lg-5">
+          <h2 class="mb-4">Quick Installation</h2>
+          <p class="lead mb-4">Get Sadeh up and running in minutes with our one-step installation process. The script automatically handles dependencies, database setup, and initial configuration.</p>
+          <div class="d-flex flex-column flex-md-row gap-3">
+            <a href="https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh" class="btn btn-primary btn-lg" download="sadeh_run.sh">
+              <i class="fas fa-download me-2"></i> Download Script
+            </a>
+            <a href="https://github.com/mmdmirh/sadeh/blob/main/deploy/run.sh" target="_blank" class="btn btn-outline-secondary btn-lg">
+              <i class="fas fa-code me-2"></i> View Source
+            </a>
+          </div>
+        </div>
+        <div class="col-lg-7">
+          <div class="card shadow-lg border-0 rounded-lg">
+            <div class="card-header bg-dark text-white">
+              <div class="d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-terminal me-2"></i> Terminal</span>
+                <button class="btn btn-sm btn-light copy-all-btn" onclick="copyToClipboard('curl -s -o ~/sadeh_run.sh https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh\nchmod +x ~/sadeh_run.sh\n~/sadeh_run.sh')">Copy All</button>
               </div>
-              <div class="d-flex justify-content-between">
-                <button class="btn btn-primary copy-btn" onclick="copyToClipboard('curl -s -o ~/sadeh_run.sh https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh\nchmod +x ~/sadeh_run.sh\n~/sadeh_run.sh')">Copy Commands</button>
-                <a href="https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh" class="btn btn-outline-secondary" download="sadeh_run.sh">Download Script</a>
+            </div>
+            <div class="card-body p-0">
+              <div class="p-4 bg-dark text-light terminal-text" style="border-radius: 0 0 0.25rem 0.25rem; font-family: monospace;">
+                <div class="d-flex align-items-center mb-3">
+                  <span class="text-success me-2">$</span>
+                  <code>curl -s -o ~/sadeh_run.sh https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh</code>
+                  <button class="btn btn-sm btn-outline-light ms-2 copy-line-btn" onclick="copyToClipboard('curl -s -o ~/sadeh_run.sh https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh')"><i class="fas fa-copy"></i></button>
+                </div>
+                <div class="d-flex align-items-center mb-3">
+                  <span class="text-success me-2">$</span>
+                  <code>chmod +x ~/sadeh_run.sh</code>
+                  <button class="btn btn-sm btn-outline-light ms-2 copy-line-btn" onclick="copyToClipboard('chmod +x ~/sadeh_run.sh')"><i class="fas fa-copy"></i></button>
+                </div>
+                <div class="d-flex align-items-center">
+                  <span class="text-success me-2">$</span>
+                  <code>~/sadeh_run.sh</code>
+                  <button class="btn btn-sm btn-outline-light ms-2 copy-line-btn" onclick="copyToClipboard('~/sadeh_run.sh')"><i class="fas fa-copy"></i></button>
+                </div>
               </div>
             </div>
             <div class="card-footer bg-light">
-              <small class="text-muted">This will download and run the latest Sadeh installation script. For custom installation options, please refer to the <a href="https://github.com/mmdmirh/sadeh#installation" target="_blank">installation guide</a>.</small>
+              <small class="text-muted">The installation script handles dependency installation, database setup, initial configuration, and service deployment. For custom options, see the <a href="https://github.com/mmdmirh/sadeh#installation" target="_blank">installation guide</a>.</small>
             </div>
           </div>
         </div>
@@ -186,73 +211,111 @@
   <!-- Features Section -->
   <section id="features" class="py-5">
     <div class="container">
-      <h2 class="text-center mb-5">Features</h2>
+      <h2 class="text-center mb-5">Key Features</h2>
       <div class="row g-4">
-        <div class="col-md-4">
+        <div class="col-lg-6">
           <div class="feature-card">
-            <div class="text-center">
-              <i class="fas fa-comments feature-icon"></i>
-              <h3>Conversational AI</h3>
+            <div class="d-flex align-items-start">
+              <i class="fas fa-brain feature-icon me-4 mt-2" style="color: #3a7bd5;"></i>
+              <div>
+                <h3>Enterprise Conversational AI</h3>
+                <p>Advanced multi-model conversation system with context awareness and memory. Supports interactions with multiple AI models through an intuitive chat interface with threaded conversation history.</p>
+                <ul class="mt-2">
+                  <li>Context-aware conversations with memory</li>
+                  <li>Multi-model support with model switching</li>
+                  <li>Conversation history and thread management</li>
+                </ul>
+              </div>
             </div>
-            <p>Engage with multiple AI models through an intuitive chat interface. Have natural conversations with context awareness and history tracking.</p>
           </div>
         </div>
-        <div class="col-md-4">
+        
+        <div class="col-lg-6">
           <div class="feature-card">
-            <div class="text-center">
-              <i class="fas fa-microphone feature-icon"></i>
-              <h3>Voice Capabilities</h3>
+            <div class="d-flex align-items-start">
+              <i class="fas fa-search-plus feature-icon me-4 mt-2" style="color: #00d2ff;"></i>
+              <div>
+                <h3>Document Intelligence (RAG)</h3>
+                <p>Powerful Retrieval-Augmented Generation capabilities with document processing and knowledge extraction. Upload, process, and query documents to get AI-enhanced responses based on your data.</p>
+                <ul class="mt-2">
+                  <li>Document indexing and semantic search</li>
+                  <li>Knowledge extraction and contextualization</li>
+                  <li>Document-grounded AI responses</li>
+                </ul>
+              </div>
             </div>
-            <p>Record voice messages and get AI responses through text-to-speech synthesis. Support for multiple voices and natural language understanding.</p>
           </div>
         </div>
-        <div class="col-md-4">
+        
+        <div class="col-lg-6">
           <div class="feature-card">
-            <div class="text-center">
-              <i class="fas fa-file-alt feature-icon"></i>
-              <h3>Document Processing</h3>
+            <div class="d-flex align-items-start">
+              <i class="fas fa-user-shield feature-icon me-4 mt-2" style="color: #9c27b0;"></i>
+              <div>
+                <h3>Enterprise Security & Access Control</h3>
+                <p>Comprehensive Role-Based Access Control (RBAC) system for pages, features, and AI models. Secure authentication and granular permission management for enterprise use.</p>
+                <ul class="mt-2">
+                  <li>Managed page and model permissions</li>
+                  <li>Role-based feature access control</li>
+                  <li>Secure user authentication system</li>
+                </ul>
+              </div>
             </div>
-            <p>Upload and process documents for Retrieval-Augmented Generation (RAG). Extract knowledge and get AI responses based on document content.</p>
           </div>
         </div>
-        <div class="col-md-4">
+        
+        <div class="col-lg-6">
           <div class="feature-card">
-            <div class="text-center">
-              <i class="fas fa-user-shield feature-icon"></i>
-              <h3>Role-Based Access</h3>
+            <div class="d-flex align-items-start">
+              <i class="fas fa-microphone-alt feature-icon me-4 mt-2" style="color: #ff9800;"></i>
+              <div>
+                <h3>Voice Interaction</h3>
+                <p>Seamless voice recording and text-to-speech capabilities for hands-free AI interaction. Record voice messages and receive spoken responses through advanced speech synthesis.</p>
+                <ul class="mt-2">
+                  <li>Voice message recording and processing</li>
+                  <li>Text-to-speech response synthesis</li>
+                  <li>Multiple voice options and languages</li>
+                </ul>
+              </div>
             </div>
-            <p>Comprehensive RBAC system for controlling access to pages, features, and AI models. Easily manage user permissions through the admin interface.</p>
-          </div>
-        </div>
-        <div class="col-md-4">
-          <div class="feature-card">
-            <div class="text-center">
-              <i class="fas fa-database feature-icon"></i>
-              <h3>Robust Database</h3>
-            </div>
-            <p>SQLAlchemy ORM with automatic migrations and seeding. Stores conversations, user data, permissions, and document indices efficiently.</p>
-          </div>
-        </div>
-        <div class="col-md-4">
-          <div class="feature-card">
-            <div class="text-center">
-              <i class="fas fa-cogs feature-icon"></i>
-              <h3>RESTful API</h3>
-            </div>
-            <p>Comprehensive API endpoints for all functionality including authentication, conversations, document management, and administration.</p>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- API Documentation Section -->
-  <section id="api-docs" class="py-5">
+  <!-- API Docs Section -->
+  <section id="api-docs" class="py-5 bg-gradient" style="background: linear-gradient(135deg, #0d47a1, #42a5f5);">
     <div class="container">
-      <div class="api-doc-container text-center">
-        <h2 class="mb-4">API Documentation</h2>
-        <p class="mb-4">Explore the complete Sadeh API documentation with interactive Swagger UI.</p>
-        <a href="swagger.html" class="btn btn-primary btn-lg">View API Documentation</a>
+      <div class="row align-items-center">
+        <div class="col-lg-6 text-white">
+          <h2 class="mb-4">Interactive API Documentation</h2>
+          <p class="lead mb-4">Explore Sadeh's RESTful API with our interactive Swagger documentation. Test endpoints directly in your browser, view request/response schemas, and integrate with your applications.</p>
+          <ul class="mb-4 list-unstyled">
+            <li class="mb-2"><i class="fas fa-check-circle me-2"></i> Complete OpenAPI 3.0 specification</li>
+            <li class="mb-2"><i class="fas fa-check-circle me-2"></i> Interactive request builder and tester</li>
+            <li class="mb-2"><i class="fas fa-check-circle me-2"></i> Detailed schema documentation</li>
+            <li class="mb-2"><i class="fas fa-check-circle me-2"></i> Authentication endpoints</li>
+          </ul>
+          <a href="swagger.html" class="btn btn-light btn-lg">
+            <i class="fas fa-book me-2"></i> Open API Explorer
+          </a>
+        </div>
+        <div class="col-lg-6">
+          <div class="card shadow-lg border-0 rounded-lg overflow-hidden">
+            <img src="https://raw.githubusercontent.com/swagger-api/swagger-ui/master/docs/images/swagger-ui.png" alt="Swagger UI Screenshot" class="img-fluid rounded-top">
+            <div class="card-body bg-light p-4">
+              <h5>RESTful API with OpenAPI 3.0</h5>
+              <p>Our comprehensive API documentation allows developers to quickly understand and integrate with Sadeh's functionality.</p>
+              <div class="d-flex justify-content-between align-items-center">
+                <a href="https://github.com/mmdmirh/sadeh/blob/main/api/openapi.yaml" class="btn btn-sm btn-outline-primary" target="_blank">
+                  <i class="fas fa-code me-1"></i> View Spec Source
+                </a>
+                <span class="badge bg-success">OpenAPI 3.0</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -261,30 +324,53 @@
   <footer class="footer">
     <div class="container">
       <div class="row">
-        <div class="col-md-6">
+        <div class="col-md-5">
           <h5>About Sadeh</h5>
-          <p>Sadeh is an AI assistant application built with Flask that provides conversational AI, voice capabilities, and document processing features through a clean and intuitive interface.</p>
+          <p>Sadeh is an enterprise-ready AI assistant platform built with Flask. It delivers secure, context-aware conversations with advanced RAG capabilities, voice interaction, and comprehensive access control for organizations that need AI tailored to their data.</p>
+          <div class="d-flex mt-3">
+            <a href="https://github.com/mmdmirh/sadeh" class="text-light me-3" target="_blank"><i class="fab fa-github fa-2x"></i></a>
+            <a href="https://github.com/mmdmirh/sadeh/stargazers" class="text-light me-3" target="_blank"><i class="fas fa-star fa-2x"></i></a>
+            <a href="https://github.com/mmdmirh/sadeh/fork" class="text-light" target="_blank"><i class="fas fa-code-branch fa-2x"></i></a>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <h5>Quick Links</h5>
+          <div class="row">
+            <div class="col-6">
+              <ul class="list-unstyled">
+                <li><a href="#" class="text-light">Home</a></li>
+                <li><a href="#installation" class="text-light">Installation</a></li>
+                <li><a href="#features" class="text-light">Features</a></li>
+                <li><a href="#api-docs" class="text-light">API Docs</a></li>
+              </ul>
+            </div>
+            <div class="col-6">
+              <ul class="list-unstyled">
+                <li><a href="swagger.html" class="text-light">API Explorer</a></li>
+                <li><a href="https://github.com/mmdmirh/sadeh#readme" target="_blank" class="text-light">README</a></li>
+                <li><a href="https://github.com/mmdmirh/sadeh/blob/main/LICENSE" target="_blank" class="text-light">License</a></li>
+                <li><a href="https://github.com/mmdmirh/sadeh/issues" target="_blank" class="text-light">Issues</a></li>
+              </ul>
+            </div>
+          </div>
         </div>
         <div class="col-md-3">
-          <h5>Links</h5>
+          <h5>Getting Started</h5>
           <ul class="list-unstyled">
-            <li><a href="#" class="text-light">Home</a></li>
-            <li><a href="#features" class="text-light">Features</a></li>
-            <li><a href="#api-docs" class="text-light">API Documentation</a></li>
-            <li><a href="https://github.com/mmdmirh/sadeh" target="_blank" class="text-light">GitHub</a></li>
-          </ul>
-        </div>
-        <div class="col-md-3">
-          <h5>Resources</h5>
-          <ul class="list-unstyled">
-            <li><a href="swagger.html" class="text-light">OpenAPI Spec</a></li>
-            <li><a href="https://github.com/mmdmirh/sadeh/issues" target="_blank" class="text-light">Report Issues</a></li>
+            <li><a href="#installation" class="text-light">Quick Install</a></li>
+            <li><a href="https://github.com/mmdmirh/sadeh/blob/main/docs/installation.md" target="_blank" class="text-light">Installation Guide</a></li>
+            <li><a href="https://github.com/mmdmirh/sadeh/blob/main/docs/configuration.md" target="_blank" class="text-light">Configuration</a></li>
+            <li><a href="https://github.com/mmdmirh/sadeh/blob/main/docs/deployment.md" target="_blank" class="text-light">Deployment</a></li>
           </ul>
         </div>
       </div>
       <hr class="mt-4 mb-4" style="background-color: rgba(255,255,255,0.2);">
-      <div class="text-center">
-        <p>&copy; 2025 Sadeh. All rights reserved.</p>
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-center">
+        <p class="mb-2 mb-md-0">&copy; 2025 Sadeh. All rights reserved.</p>
+        <div>
+          <a href="https://github.com/mmdmirh/sadeh/blob/main/LICENSE" target="_blank" class="text-light me-3">MIT License</a>
+          <a href="https://github.com/mmdmirh/sadeh/blob/main/CONTRIBUTING.md" target="_blank" class="text-light">Contributing</a>
+        </div>
       </div>
     </div>
   </footer>
