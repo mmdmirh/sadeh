@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sadeh - AI Assistant Application</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --primary-color: #3a7bd5;
+      --secondary-color: #00d2ff;
+      --dark-color: #1a1a2e;
+      --light-color: #f5f5f7;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      min-height: 100vh;
+    }
+    
+    .navbar {
+      background-color: var(--dark-color);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .navbar-brand {
+      font-weight: 600;
+      color: var(--light-color) !important;
+    }
+    
+    .hero {
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+      color: white;
+      padding: 80px 0;
+      margin-bottom: 40px;
+    }
+    
+    .hero h1 {
+      font-weight: 700;
+      font-size: 3rem;
+      margin-bottom: 20px;
+    }
+    
+    .hero p {
+      font-size: 1.2rem;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    
+    .feature-icon {
+      font-size: 2.5rem;
+      margin-bottom: 20px;
+      color: var(--primary-color);
+    }
+    
+    .feature-card {
+      padding: 30px;
+      border-radius: 8px;
+      background-color: white;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+      height: 100%;
+      transition: transform 0.3s ease;
+    }
+    
+    .feature-card:hover {
+      transform: translateY(-5px);
+    }
+    
+    .feature-card h3 {
+      margin-bottom: 15px;
+      font-weight: 600;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+      border: none;
+      padding: 10px 20px;
+      font-weight: 500;
+    }
+    
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+    
+    .footer {
+      background-color: var(--dark-color);
+      color: var(--light-color);
+      padding: 40px 0;
+      margin-top: 60px;
+    }
+    
+    .api-doc-container {
+      margin: 50px 0;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+      padding: 20px;
+    }
+    
+    .api-doc-container h2 {
+      margin-bottom: 25px;
+    }
+    
+    #swagger-ui-container {
+      height: 800px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container">
+      <a class="navbar-brand" href="#">Sadeh</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="#features">Features</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#api-docs">API Docs</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="https://github.com/mmdmirh/sadeh" target="_blank">GitHub</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <header class="hero text-center">
+    <div class="container">
+      <h1>Sadeh AI Assistant</h1>
+      <p>A powerful AI assistant application with chat, voice, and document processing capabilities.</p>
+      <div class="mt-4">
+        <a href="#api-docs" class="btn btn-light btn-lg me-2">View API Documentation</a>
+        <a href="https://github.com/mmdmirh/sadeh" target="_blank" class="btn btn-outline-light btn-lg">GitHub Repository</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Installation Section -->
+  <section id="installation" class="py-5">
+    <div class="container">
+      <h2 class="text-center mb-5">Installation</h2>
+      <div class="row justify-content-center">
+        <div class="col-lg-8">
+          <div class="card shadow">
+            <div class="card-body p-4">
+              <h4 class="mb-3">Quick Install</h4>
+              <div class="bg-light p-3 rounded mb-3">
+                <code class="d-block mb-2">curl -s -o ~/sadeh_run.sh https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh</code>
+                <code class="d-block mb-2">chmod +x ~/sadeh_run.sh</code>
+                <code class="d-block">~/sadeh_run.sh</code>
+              </div>
+              <div class="d-flex justify-content-between">
+                <button class="btn btn-primary copy-btn" onclick="copyToClipboard('curl -s -o ~/sadeh_run.sh https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh\nchmod +x ~/sadeh_run.sh\n~/sadeh_run.sh')">Copy Commands</button>
+                <a href="https://raw.githubusercontent.com/mmdmirh/sadeh/main/deploy/run.sh" class="btn btn-outline-secondary" download="sadeh_run.sh">Download Script</a>
+              </div>
+            </div>
+            <div class="card-footer bg-light">
+              <small class="text-muted">This will download and run the latest Sadeh installation script. For custom installation options, please refer to the <a href="https://github.com/mmdmirh/sadeh#installation" target="_blank">installation guide</a>.</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section id="features" class="py-5">
+    <div class="container">
+      <h2 class="text-center mb-5">Features</h2>
+      <div class="row g-4">
+        <div class="col-md-4">
+          <div class="feature-card">
+            <div class="text-center">
+              <i class="fas fa-comments feature-icon"></i>
+              <h3>Conversational AI</h3>
+            </div>
+            <p>Engage with multiple AI models through an intuitive chat interface. Have natural conversations with context awareness and history tracking.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card">
+            <div class="text-center">
+              <i class="fas fa-microphone feature-icon"></i>
+              <h3>Voice Capabilities</h3>
+            </div>
+            <p>Record voice messages and get AI responses through text-to-speech synthesis. Support for multiple voices and natural language understanding.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card">
+            <div class="text-center">
+              <i class="fas fa-file-alt feature-icon"></i>
+              <h3>Document Processing</h3>
+            </div>
+            <p>Upload and process documents for Retrieval-Augmented Generation (RAG). Extract knowledge and get AI responses based on document content.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card">
+            <div class="text-center">
+              <i class="fas fa-user-shield feature-icon"></i>
+              <h3>Role-Based Access</h3>
+            </div>
+            <p>Comprehensive RBAC system for controlling access to pages, features, and AI models. Easily manage user permissions through the admin interface.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card">
+            <div class="text-center">
+              <i class="fas fa-database feature-icon"></i>
+              <h3>Robust Database</h3>
+            </div>
+            <p>SQLAlchemy ORM with automatic migrations and seeding. Stores conversations, user data, permissions, and document indices efficiently.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card">
+            <div class="text-center">
+              <i class="fas fa-cogs feature-icon"></i>
+              <h3>RESTful API</h3>
+            </div>
+            <p>Comprehensive API endpoints for all functionality including authentication, conversations, document management, and administration.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- API Documentation Section -->
+  <section id="api-docs" class="py-5">
+    <div class="container">
+      <div class="api-doc-container text-center">
+        <h2 class="mb-4">API Documentation</h2>
+        <p class="mb-4">Explore the complete Sadeh API documentation with interactive Swagger UI.</p>
+        <a href="swagger.html" class="btn btn-primary btn-lg">View API Documentation</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-6">
+          <h5>About Sadeh</h5>
+          <p>Sadeh is an AI assistant application built with Flask that provides conversational AI, voice capabilities, and document processing features through a clean and intuitive interface.</p>
+        </div>
+        <div class="col-md-3">
+          <h5>Links</h5>
+          <ul class="list-unstyled">
+            <li><a href="#" class="text-light">Home</a></li>
+            <li><a href="#features" class="text-light">Features</a></li>
+            <li><a href="#api-docs" class="text-light">API Documentation</a></li>
+            <li><a href="https://github.com/mmdmirh/sadeh" target="_blank" class="text-light">GitHub</a></li>
+          </ul>
+        </div>
+        <div class="col-md-3">
+          <h5>Resources</h5>
+          <ul class="list-unstyled">
+            <li><a href="swagger.html" class="text-light">OpenAPI Spec</a></li>
+            <li><a href="https://github.com/mmdmirh/sadeh/issues" target="_blank" class="text-light">Report Issues</a></li>
+          </ul>
+        </div>
+      </div>
+      <hr class="mt-4 mb-4" style="background-color: rgba(255,255,255,0.2);">
+      <div class="text-center">
+        <p>&copy; 2025 Sadeh. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    function copyToClipboard(text) {
+      // Create a temporary textarea element
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      
+      // Select and copy the text
+      textarea.select();
+      document.execCommand('copy');
+      
+      // Remove the temporary element
+      document.body.removeChild(textarea);
+      
+      // Provide user feedback
+      const copyBtn = document.querySelector('.copy-btn');
+      const originalText = copyBtn.textContent;
+      copyBtn.textContent = 'Copied!';
+      copyBtn.classList.add('btn-success');
+      copyBtn.classList.remove('btn-primary');
+      
+      // Reset after 2 seconds
+      setTimeout(() => {
+        copyBtn.textContent = originalText;
+        copyBtn.classList.add('btn-primary');
+        copyBtn.classList.remove('btn-success');
+      }, 2000);
+    }
+  </script>
+</body>
+</html>

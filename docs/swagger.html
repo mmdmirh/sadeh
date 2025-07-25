@@ -22,11 +22,56 @@
     body {
       margin: 0;
       background: #fafafa;
+      padding-top: 60px;
+    }
+    
+    .navbar {
+      background-color: #1a1a2e;
+      position: fixed;
+      top: 0;
+      width: 100%;
+      z-index: 1000;
+      padding: 15px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .navbar-brand {
+      color: white;
+      font-weight: 600;
+      font-size: 1.25rem;
+      text-decoration: none;
+    }
+    
+    .navbar-links {
+      display: flex;
+      gap: 20px;
+    }
+    
+    .navbar-links a {
+      color: white;
+      text-decoration: none;
+      padding: 8px 15px;
+      border-radius: 4px;
+      transition: background-color 0.3s;
+    }
+    
+    .navbar-links a:hover {
+      background-color: rgba(255,255,255,0.1);
     }
   </style>
 </head>
 
 <body>
+  <nav class="navbar">
+    <a href="index.html" class="navbar-brand">Sadeh</a>
+    <div class="navbar-links">
+      <a href="index.html">Home</a>
+      <a href="https://github.com/mmdmirh/sadeh" target="_blank">GitHub</a>
+    </div>
+  </nav>
+  
   <div id="swagger-ui"></div>
 
   <script src="https://unpkg.com/swagger-ui-dist@4.5.0/swagger-ui-bundle.js"></script>
