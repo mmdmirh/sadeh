@@ -1,89 +1,80 @@
 #!/bin/sh
-set -x
-# wait-for-db.sh
-# Wait for MySQL to be fully ready
+# wait-for-db.sh - Waits for MySQL database to be available before starting the application
 
 set -e
 
-# Use environment variables for configuration, with defaults
-host="${MYSQL_HOST:-mysql}"
+# Store the command to execute after successful database check
+cmd="$@"
+
+# Check if MYSQL_HOST is set
+if [ -z "$MYSQL_HOST" ]; then
+  echo "ERROR: MYSQL_HOST environment variable is not set. Cannot wait for database."
+  echo "WARN: Proceeding without database check. This may cause application errors."
+  exec $cmd
+fi
+
+# Use default port 3306 if MYSQL_PORT is not set
 port="${MYSQL_PORT:-3306}"
+host="$MYSQL_HOST"
+
+echo "INFO: Waiting for MySQL at $host:$port..."
+
+# Add a debugging ping to check host connectivity
+echo "DEBUG: Pinging the database host to check network connectivity..."
+ping -c 2 "$host" || echo "WARN: Could not ping host $host - DNS may not be resolving properly"
+
+# Wait for the database to become available using netcat
+echo "INFO: Checking database port availability..."
+max_attempts=30
+attempt=0
+
+while [ $attempt -lt $max_attempts ]; do
+  if nc -z -w 2 "$host" "$port"; then
+    echo "INFO: MySQL is available at $host:$port"
+    echo "INFO: Executing command: $cmd"
+    # Execute the passed command once the database is available
+    exec $cmd
+  else
+    attempt=$((attempt + 1))
+    echo "WAIT: MySQL is unavailable at $host:$port - sleeping (attempt $attempt/$max_attempts)"
+    sleep 2
+  fi
+done
+
+echo "ERROR: Could not connect to MySQL at $host:$port after $max_attempts attempts"
+echo "WARN: Starting application anyway - this may cause errors if database is required"
+
+# If we reach here, the database connection check failed but we'll try to start anyway
+exec $cmd
+
+set -e
+
+# wait-for-db.sh: wait for MySQL to be ready, then execute a command.
+
+host="${MYSQL_HOST}"
+port="${MYSQL_PORT}"
 user="${MYSQL_USER}"
 password="${MYSQL_PASSWORD}"
 cmd="$@"
 
-# Debug information
->&2 echo "=== Starting wait-for-db.sh ==="
->&2 echo "Host: $host"
->&2 echo "Port: $port"
->&2 echo "User: $user"
->&2 echo "Command: $cmd"
-
-# The mysql client is now installed via the Dockerfile, so this check is no longer needed.
-
-# Wait for MySQL to be available
-counter=0
 max_attempts=30
+counter=0
 
->&2 echo "Waiting for MySQL to be available at $host:$port..."
+>&2 echo "Waiting for MySQL at $host:$port..."
 
-while [ $counter -lt $max_attempts ]; do
-    if ! mysql -h "$host" -P "$port" -u"$user" -p"$password" -e 'SELECT 1' 2>/dev/null; then
-        counter=$((counter+1))
-        >&2 echo "MySQL is unavailable - sleeping (attempt $counter/$max_attempts)"
-        sleep 2
-    else
-        >&2 echo "MySQL is up!"
-        break
-    fi
-    
-    if [ $counter -eq $max_attempts ]; then
-        >&2 echo "Failed to connect to MySQL after $max_attempts attempts. Giving up."
+while ! mysql -h "$host" -P "$port" -u"$user" -p"$password" --ssl -e 'SELECT 1'; do
+    counter=$((counter+1))
+    if [ $counter -ge $max_attempts ]; then
+        >&2 echo "MySQL is unavailable - giving up after $max_attempts attempts."
         exit 1
     fi
+    >&2 echo "MySQL is unavailable - sleeping (attempt $counter of $max_attempts)."
+    sleep 2
 done
 
-# Additional check to ensure the database is fully initialized
->&2 echo "MySQL is up - checking if database is initialized..."
-if ! mysql -h "$host" -P "$port" -u"$user" -p"$password" -e 'SHOW DATABASES' 2>/dev/null; then
-    >&2 echo "Failed to list databases. MySQL may be up but not fully initialized."
-    exit 1
-fi
+>&2 echo "MySQL is up - executing command: $cmd"
+# Execute the main command directly
+>&2 echo "MySQL is up - starting application..."
 
-# Final check
->&2 echo "MySQL is up and database is ready - checking database access..."
-if ! mysql -h "$host" -P "$port" -u"$user" -p"$password" -e 'SHOW DATABASES;'; then
-    >&2 echo "Failed to access databases. Check user permissions."
-    exit 1
-fi
-
->&2 echo "=== MySQL is ready. Applying database migrations... ==="
-# First, generate any new migration scripts based on model changes
-echo "Running flask db migrate..."
-flask db migrate -m "auto migration" || true
-echo "flask db migrate finished."
-
-# Then, apply all migrations to bring the schema up to date
-echo "Running flask db upgrade..."
-flask db upgrade
-echo "flask db upgrade finished."
-
-# Finally, run our custom command to populate the DB with initial data
-echo "Running flask init-db..."
-flask init-db
-echo "flask init-db finished."
-
-# Setup ChromaDB database
->&2 echo "=== Setting up ChromaDB MySQL database... ==="
-python scripts/setup_chroma_db.py
-STATUS=$?
-if [ $STATUS -ne 0 ]; then
-    >&2 echo "=== Failed to setup ChromaDB database. Continuing anyway... ==="
-else
-    >&2 echo "=== ChromaDB database setup complete ==="
-fi
-
->&2 echo "=== Database setup complete. Starting application... ==="
-
-echo "Executing final command: $cmd"
+# No need for manual migrations or seeding - the app will handle these internally now
 exec $cmd

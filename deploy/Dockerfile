@@ -3,8 +3,15 @@
 
 FROM python:3.11-slim-bullseye
 
-# Install MySQL client for wait-for-db.sh
-RUN apt-get update && apt-get install -y default-mysql-client libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+# Install netcat (netcat-openbsd) for the wait-for-db.sh script to check the database connection
+# Install all required packages in a single layer to optimize image size and avoid caching issues
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    iputils-ping \
+    netcat-openbsd \
+    default-mysql-client \
+    curl \
+    libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -33,14 +40,17 @@ COPY backend/db/db/migrations /home/app/backend/db/db/migrations
 
 # Create scripts directory and copy ChromaDB setup script
 RUN mkdir -p /home/app/scripts
+
+
 COPY backend/db_folder/setup_chroma_db.py /home/app/scripts/setup_chroma_db.py
 
 # Fix format_sse function reference issue
 
 
-# Set appropriate ownership of app files
+# Set appropriate ownership and permissions of app files
 RUN chown -R app:app /home/app && \
-    chmod +x /home/app/deploy/wait-for-db.sh
+    chmod +x /home/app/deploy/wait-for-db.sh && \
+    chmod +x /home/app/scripts/setup_chroma_db.py
 
 # Switch to non-root user
 USER app

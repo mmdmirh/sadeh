@@ -1,7 +1,7 @@
 import datetime
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
-from backend.db.db.extensions import db
+from backend.db.extensions import db
 
 # Association tables
 user_roles = db.Table('user_roles',
@@ -71,6 +71,15 @@ class Conversation(db.Model):
     document_mode = db.Column(db.Boolean, default=False)
     messages = db.relationship('ChatMessage', backref='conversation', cascade="all, delete-orphan", lazy=True)
     documents = db.relationship('Document', backref='conversation', cascade="all, delete-orphan", lazy=True)
+    
+    def get_hash(self):
+        """Generate a secure hash for this conversation ID."""
+        from backend.db.conversation_hash import encode_conversation_id
+        return encode_conversation_id(self.id, self.user_id)
+    
+    def get_hash_param(self):
+        """Get the URL parameter string for this conversation."""
+        return f"conversation_hash={self.get_hash()}"
 
 class ChatMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)

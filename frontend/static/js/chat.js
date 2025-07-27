@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const promptInput = document.getElementById('prompt');
   const chatBody = document.getElementById('chat-body');
   const sendButton = document.getElementById('send-btn');
-  const conversationId = document.getElementById('conversation_id')?.value;
+  const conversationHash = document.getElementById('conversation_hash')?.value;
   // const fileUpload = document.getElementById('file-upload'); // Retain if used, ensure it's handled
   const modelSelect = document.getElementById('model-select');
   const newChatForm = document.querySelector('.new-chat-form');
@@ -272,9 +272,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!text) return;
 
     // Check if there's a conversation selected
-    const conversationId = document.getElementById('conversation_id')?.value;
-    if (!conversationId) {
-        displayChatMessage('ai', 'No conversation is active. Please select one or start a new chat.', true, 'No conversation ID found.');
+    const conversationHash = document.getElementById('conversation_hash')?.value;
+    if (!conversationHash) {
+        displayChatMessage('ai', 'No conversation is active. Please select one or start a new chat.', true, 'No conversation hash found.');
         return;
     }
 
@@ -302,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const formData = new FormData();
-    formData.append('conversation_id', conversationId);
+    formData.append('conversation_hash', conversationHash);
     formData.append('prompt', text);
     if (modelSelect && modelSelect.value) {
         formData.append('model', modelSelect.value);

@@ -1,20 +1,45 @@
-# In order to use the latest version of sqlite3, we need to import it before any other libraries that might use it.
-# This is a workaround for the fact that the default sqlite3 version in the system is too old for chromadb.
-# see: https://docs.trychroma.com/troubleshooting#sqlite
-try:
-    __import__('pysqlite3')
-    import sys
-    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-except ImportError:
-    print("pysqlite3 not found, using default sqlite3")
-
+# STARTUP DIAGNOSTICS AND ERROR HANDLING
+# This block ensures we catch and log critical startup errors that might cause worker crashes
+import sys
 import os
-from backend.db_folder.chroma_db import get_chroma_client, get_embedding_function
+import traceback
+import logging
 
+# Set up emergency logging to capture any early startup failures
+emergency_logger = logging.getLogger('emergency')
+emergency_logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s in %(name)s: %(message)s'))
+emergency_logger.addHandler(handler)
 
+# Create file handler for persistent logs
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../logs')
+os.makedirs(log_dir, exist_ok=True)
+file_handler = logging.FileHandler(os.path.join(log_dir, 'startup_errors.log'))
+file_handler.setLevel(logging.ERROR)
+file_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s in %(name)s: %(message)s'))
+emergency_logger.addHandler(file_handler)
 
+emergency_logger.info('Starting application initialization')
 
+try:
+    # In order to use the latest version of sqlite3, we need to import it before any other libraries that might use it.
+    # This is a workaround for the fact that the default sqlite3 version in the system is too old for chromadb.
+    # see: https://docs.trychroma.com/troubleshooting#sqlite
+    try:
+        __import__('pysqlite3')
+        import sys
+        sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+        emergency_logger.info('Successfully imported pysqlite3 and substituted for sqlite3')
+    except ImportError:
+        emergency_logger.warning("pysqlite3 not found, using default sqlite3")
+except Exception as e:
+    emergency_logger.critical(f"CRITICAL ERROR during sqlite import substitution: {str(e)}")
+    emergency_logger.critical(traceback.format_exc())
+    # Continue execution to see if we can proceed without this substitution
 
+# Standard library imports
+import os
 import sys
 import io
 import tempfile
@@ -30,32 +55,39 @@ import traceback
 import re
 import concurrent.futures
 import click
+import uuid
+import subprocess
+from pathlib import Path
+from urllib.parse import quote_plus
 
-from flask import Flask, render_template, request, redirect, url_for, flash, Response, send_file, jsonify, session, stream_with_context
+# Third-party imports
+import pymysql
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, redirect, url_for, flash, Response, send_file, jsonify, session, stream_with_context, Blueprint
 from sqlalchemy import create_engine, event, text, inspect, and_, or_, not_, desc, asc, func, exc
 from sqlalchemy.orm import joinedload
-
-
-from backend.db.db.extensions import db
-from backend.db.db.models import User, Conversation, ChatMessage, Document, PagePermission, Role, RagDocument, RagIndex, Model, user_roles, role_models, rag_doc_in_index
-from backend.db.db.seed import initialize_rbac_data, create_database_if_not_exists
 from flask_login import LoginManager, login_user, logout_user, current_user, login_required, UserMixin
 from flask_migrate import Migrate, upgrade
 from flask_mail import Mail, Message
 from werkzeug.security import generate_password_hash, check_password_hash
-from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
-from urllib.parse import quote_plus
-import time
 from flask_wtf.csrf import CSRFProtect
-import subprocess
-
-
+import ollama
 from ollama import RequestError, ResponseError
-import uuid
-import threading
-import subprocess
-from pathlib import Path
+
+
+# Internal application imports
+from backend.db_folder.chroma_db import get_chroma_client, get_embedding_function
+from backend.db.extensions import db
+from backend.db.models import User, Role, Conversation, ChatMessage, Document, PagePermission, Model, RagDocument, RagIndex, user_roles, role_models, rag_doc_in_index
+from backend.db.seed import initialize_rbac_data, create_database_if_not_exists
+from backend.db.utils import (
+    is_database_initialized, check_database_connection, load_and_ensure_llm_models,
+    run_unified_db_initialization, init_db, get_default_model
+)
+
+# Import our LLM service abstraction
+from backend.llm.llm_service import LLMServiceFactory
 
 # Langchain imports for RAG
 # Using the newer package-specific imports to avoid deprecation warnings
@@ -65,9 +97,6 @@ import chromadb # Keep this for now, will remove if not needed after other chang
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredFileLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
-
-# Import our new LLM service abstraction
-from backend.llm.llm_service import LLMServiceFactory
 
 # ===========================
 # Background Model Pull
@@ -123,11 +152,75 @@ def pull_embedding_models_in_background(app_instance):
 # ===========================
 
 import pymysql
+from urllib.parse import quote_plus
 
 # Database creation has been moved to backend/db/db/seed.py
-from backend.db.db.seed import create_database_if_not_exists
+# Import moved to consolidated db utils
 
 app = Flask(__name__, static_folder='../../frontend/static', template_folder='../../frontend/templates')
+
+# Load configuration from environment variables
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-secret-key-for-development')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# --- Database Configuration ---
+# Construct the database URI from environment variables
+try:
+    emergency_logger.info("Configuring database connection")
+    mysql_user = os.environ.get('MYSQL_USER')
+    mysql_password = os.environ.get('MYSQL_PASSWORD')
+    mysql_host = os.environ.get('MYSQL_HOST')
+    mysql_port = os.environ.get('MYSQL_PORT')
+    mysql_db = os.environ.get('MYSQL_DATABASE')
+    
+    if all([mysql_user, mysql_password, mysql_host, mysql_port, mysql_db]):
+        # URL-encode the username and password to handle special characters.
+        mysql_user_encoded = quote_plus(mysql_user)
+        mysql_password_encoded = quote_plus(mysql_password)
+
+        app.logger.info(f"Attempting to connect to MySQL with host: '{mysql_host}' and port: '{mysql_port}'")
+        connection_str = f"mysql+pymysql://{mysql_user_encoded}:{mysql_password_encoded}@{mysql_host}:{mysql_port}/{mysql_db}"
+        app.config['SQLALCHEMY_DATABASE_URI'] = connection_str
+
+        # Configure SSL for Azure MySQL and connection recycling
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'connect_args': {
+                'ssl': {
+                    'ssl_mode': 'REQUIRED'
+                }
+            },
+            'pool_recycle': 280
+        }
+    else:
+        # Fallback to a local SQLite database if environment variables are not set
+        app.logger.warning("Database environment variables not fully set. Falling back to local SQLite database.")
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sadeh.db'
+except Exception as e:
+    emergency_logger.error(f"Error configuring database connection: {e}")
+    app.logger.error(f"Error configuring database connection: {e}")
+    # Fallback to SQLite as a last resort
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sadeh.db'
+
+# Initialize extensions with app
+db.init_app(app)
+csrf = CSRFProtect(app)
+
+# Initialize login manager
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+
+# Initialize mail for user notifications
+mail = Mail(app)
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
+app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True').lower() in ['true', '1', 't']
+app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'False').lower() in ['true', '1', 't']
+mail.init_app(app)
+
+# Set up migration manager
+migrate = Migrate(app, db, directory='backend/db/migrations')
 
 # === Set log level from environment variable (default to INFO) ===
 import logging
@@ -138,25 +231,11 @@ else:
     app.logger.setLevel(logging.INFO)
 app.logger.info(f"[INIT] Log level set to {app.logger.level} ({log_level})")
 
-# Set log level from environment variable (default to INFO)
-import os, logging
-log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
-if hasattr(logging, log_level):
-    app.logger.setLevel(getattr(logging, log_level))
-else:
-    app.logger.setLevel(logging.INFO)
-app.logger.info(f"[INIT] Log level set to {app.logger.level} ({log_level})")
-
 # Start pulling embedding models in the background
 pull_embedding_models_in_background(app)
 
-# Speech service functionality has been removed
-from flask import Blueprint # Added for Blueprint
-from flask import jsonify
-
-# Logging is now handled by Gunicorn and the Flask app app.logger.
-# We will use app.logger for all application-level logging.
-import logging
+# Import helpers
+from flask import Blueprint, jsonify
 
 @app.route('/api/rag_index/progress/<int:index_id>')
 def get_rag_index_progress(index_id):
@@ -472,58 +551,19 @@ app.config['RAG_INDEX_FOLDER'] = str(RAG_INDEX_FOLDER)   # make it visible every
 app.secret_key = os.environ.get('SECRET_KEY', 'you-will-never-guess')
 csrf = CSRFProtect(app)
 
-# Retrieve individual MySQL settings from .env
-mysql_user = os.environ.get('MYSQL_USER')
-mysql_password = os.environ.get('MYSQL_PASSWORD')
-mysql_database = os.environ.get('MYSQL_DATABASE')
-# Use the Docker service name 'mysql' or the env var if set
-mysql_host = os.environ.get('MYSQL_HOST', 'mysql')
-mysql_port = os.environ.get('MYSQL_PORT', '3306') # Internal Docker port
-
-# URL-encode the username and password to handle special characters for Azure.
-mysql_user_encoded = quote_plus(mysql_user)
-mysql_password_encoded = quote_plus(mysql_password)
-
-# Database initialization has been moved to backend/db/db/seed.py
-# Import before using it in the app context
-from backend.db.db.seed import initialize_rbac_data, create_database_if_not_exists
-
-# Build the SQLAlchemy connection string dynamically first
-app.logger.info(f"Attempting to connect to MySQL with host: '{mysql_host}' and port: '{mysql_port}'")
-connection_str = f"mysql+pymysql://{mysql_user_encoded}:{mysql_password_encoded}@{mysql_host}:{mysql_port}/{mysql_database}"
-app.config['SQLALCHEMY_DATABASE_URI'] = connection_str
-
-# Now that the connection string is in app.config, ensure the database exists
+# Now that the DB is configured, ensure the database itself exists.
 create_database_if_not_exists(app)
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'connect_args': {
-        'ssl': {
-            'ssl_mode': 'REQUIRED'
-        }
-    }
-}
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_POOL_RECYCLE'] = 280 # Recycle connections to prevent timeouts
 
-# Initialize SQLAlchemy with the app instance
-db.init_app(app)
-migrate = Migrate(app, db, directory='backend/db/db/migrations', compare_type=True)
+# SQLAlchemy has already been initialized earlier in this file (line ~133)
+# So we don't need to call db.init_app(app) again
+
+# Set up migrations with the correct directory
+# migrate = Migrate(app, db, directory='backend/db/db/migrations', compare_type=True)
 
 # Database initialization has been moved to backend/db/db/seed.py
-# Import before using it in the app context
-from backend.db.db.seed import initialize_rbac_data, create_database_if_not_exists
+# Imports moved to consolidated db utils
 
-# Programmatically run migrations on startup
-with app.app_context():
-    print("Applying database migrations...")
-    try:
-        upgrade()
-        print("Database migrations applied successfully.")
-        app.config['DATABASE_INITIALIZED'] = True
-        # Now that the database is confirmed to be initialized, seed it with initial data.
-        initialize_rbac_data(app)
-    except Exception as e:
-        print(f"Error applying database migrations: {e}")
+
 
 # Configure Flask-Mail (read SMTP settings from environment)
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.example.com')
@@ -559,18 +599,7 @@ DEFAULT_MODEL_NAME = None # Will be determined by the logic below
 # Check if database tables exist and set up error handling
 import sqlalchemy.exc
 
-def is_database_initialized():
-    """Check if essential database tables exist"""
-    try:
-        # Try to query a table that should exist if the database is initialized
-        db.session.execute(db.select(User).limit(1))
-        return True
-    except sqlalchemy.exc.ProgrammingError as e:
-        app.logger.warning(f"Database tables not fully initialized: {str(e)}")
-        return False
-    except Exception as e:
-        app.logger.error(f"Error checking database status: {str(e)}")
-        return False
+# is_database_initialized function moved to backend/db/utils.py
 
 # Check database status
 with app.app_context():
@@ -690,14 +719,10 @@ def nl2br(value):
     return value
 
 
-# Print all registered routes for debugging (always runs)
-print("\n=== Registered Flask Routes ===")
-try:
-    for rule in app.url_map.iter_rules():
-        print(f"{rule.endpoint}: {rule}")
-except Exception as e:
-    print(f"Error printing routes: {e}")
-print("==============================\n")
+# Make sure all routes are defined below
+# The @app.route decorators will register them with Flask
+
+# Route printing logic moved to the end of the file to ensure all routes are registered first.
 
 # ===========================
 # Association Tables for RBAC
@@ -756,131 +781,23 @@ def ping():
 # ===========================
 # Ollama model listing at startup
 # ===========================
-def load_and_ensure_llm_models():
-    """Loads model list, ensures default (and specified) models are pulled if missing."""
-    with app.app_context(): # Ensure all operations run within app context
-        # Use the centrally managed list of Ollama models from app.config
-        managed_ollama_models = app.config.get('MANAGED_OLLAMA_MODELS', [])
-        app.logger.info(f"LOAD_AND_ENSURE: Using MANAGED_OLLAMA_MODELS from app.config: {managed_ollama_models}")
-
-        models_to_ensure = set(managed_ollama_models) # Start with all managed models
-        
-        # DEFAULT_MODEL_NAME should already be in managed_ollama_models if valid,
-        # but adding it here ensures it's considered if somehow missed or if it's a LlamaCPP model not in OLLAMA_MODELS.
-        if DEFAULT_MODEL_NAME: 
-            models_to_ensure.add(DEFAULT_MODEL_NAME)
-        
-        app.logger.info(f"LOAD_AND_ENSURE: Final models_to_ensure (after adding default if needed): {list(models_to_ensure)}")
-
-        available_models = []
-        try:
-            all_active_db_models = Model.query.filter_by(is_active=True).all()
-            active_db_model_names = {model.ollama_model_name for model in all_active_db_models}
-            app.logger.info(f"Active models from DB: {active_db_model_names}")
-
-            if llm_service_type == 'ollama':
-                try:
-                    initial_server_models_list = llm_service.list_models()
-                    initial_server_models_set = set(initial_server_models_list)
-                    app.logger.info(f"LOAD_AND_ENSURE: Initial models on Ollama server: {initial_server_models_set}")
-
-                    models_pulled_this_run = set()
-                    # Ensure managed models are pulled if not on server
-                    for model_name_to_pull in managed_ollama_models: # managed_ollama_models is from app.config
-                        if model_name_to_pull not in initial_server_models_set:
-                            try:
-                                app.logger.info(f"LOAD_AND_ENSURE: Model '{model_name_to_pull}' (managed) not on server. Attempting to pull...")
-                                llm_service.pull_model(model_name_to_pull)
-                                app.logger.info(f"LOAD_AND_ENSURE: Successfully pulled model '{model_name_to_pull}'.")
-                                models_pulled_this_run.add(model_name_to_pull)
-                            except Exception as e:
-                                app.logger.error(f"LOAD_AND_ENSURE: Failed to pull managed model '{model_name_to_pull}': {e}")
-                    
-                    final_server_models_set = initial_server_models_set.union(models_pulled_this_run)
-                    app.logger.info(f"LOAD_AND_ENSURE: Final models on Ollama server (after pulls): {final_server_models_set}")
-
-                    # Populate available_models from all models now on the server that are also active in DB
-                    for server_model_name in final_server_models_set:
-                        if server_model_name in active_db_model_names:
-                            db_model_obj = next((m for m in all_active_db_models if m.ollama_model_name == server_model_name), None)
-                            if db_model_obj: # Should be true if server_model_name in active_db_model_names
-                                available_models.append({
-                                    'id': db_model_obj.id,
-                                    'name': db_model_obj.display_name or db_model_obj.ollama_model_name,
-                                    'ollama_model_name': db_model_obj.ollama_model_name,
-                                    'is_default': db_model_obj.ollama_model_name == DEFAULT_MODEL_NAME
-                                })
-                except RequestError as re:
-                    app.logger.error(f"Ollama RequestError when ensuring models: {re}. This might happen if Ollama is not running or not reachable.")
-                    # Fallback: only use models already in DB if Ollama is down and they were in models_to_ensure
-                    for db_model in all_active_db_models:
-                        if db_model.ollama_model_name in models_to_ensure:
-                            available_models.append({
-                                'id': db_model.id,
-                                'name': db_model.display_name or db_model.ollama_model_name,
-                                'ollama_model_name': db_model.ollama_model_name,
-                                'is_default': db_model.ollama_model_name == DEFAULT_MODEL_NAME
-                            })
-
-            elif llm_service_type == 'llamacpp':
-                if DEFAULT_MODEL_NAME in active_db_model_names:
-                    db_model_obj = next((m for m in all_active_db_models if m.ollama_model_name == DEFAULT_MODEL_NAME), None)
-                    if db_model_obj:
-                        available_models.append({
-                            'id': db_model_obj.id,
-                            'name': db_model_obj.display_name, # Corrected to display_name
-                            'ollama_model_name': db_model_obj.ollama_model_name,
-                            'is_default': True
-                        })
-                else:
-                    app.logger.warning(f"LlamaCPP model '{DEFAULT_MODEL_NAME}' is not marked active in the database.")
-
-            # Consolidate fallback for empty available_models
-            if not available_models and DEFAULT_MODEL_NAME and DEFAULT_MODEL_NAME in active_db_model_names:
-                app.logger.info(f"No specific models made it to available_models list, but default '{DEFAULT_MODEL_NAME}' is active. Adding it.")
-                db_model_obj = next((m for m in all_active_db_models if m.ollama_model_name == DEFAULT_MODEL_NAME), None)
-                if db_model_obj:
-                    available_models.append({
-                        'id': db_model_obj.id,
-                        'name': db_model_obj.display_name, # Corrected to display_name
-                        'ollama_model_name': db_model_obj.ollama_model_name,
-                        'is_default': True
-                    })
-            
-            if DEFAULT_MODEL_NAME:
-                available_models.sort(key=lambda x: x['ollama_model_name'] != DEFAULT_MODEL_NAME)
-
-            return available_models
-
-        except Exception as e:
-            app.logger.exception(f"Error during model loading and pulling process (within app_context): {e}")
-            # Fallback logic if an error occurs even within the app_context
-            if DEFAULT_MODEL_NAME:
-                # Check if DEFAULT_MODEL_NAME exists in the database as a last resort
-                try:
-                    default_db_model = Model.query.filter_by(ollama_model_name=DEFAULT_MODEL_NAME, is_active=True).first()
-                    if default_db_model:
-                        app.logger.warning(f"Proceeding with fallback default model for UI due to error: {default_db_model.ollama_model_name} (from DB)")
-                        available_models.append({
-                            'id': default_db_model.id,
-                            'name': default_db_model.display_name,  
-                            'ollama_model_name': default_db_model.ollama_model_name, 
-                            'is_default': True,
-                            'description': default_db_model.description
-                        })
-                except Exception as db_e:
-                    app.logger.error(f"Could not even fetch default model from DB during fallback: {db_e}")
-                
-                app.logger.warning(f"Proceeding with fallback default model name (string only) for UI due to error: {DEFAULT_MODEL_NAME}")
-                # Return a structure consistent with what the chat route expects if possible, even if it's just the name
-                return [{'name': DEFAULT_MODEL_NAME, 'ollama_model_name': DEFAULT_MODEL_NAME, 'is_default': True, 'id': None}]
-            return []
+# load_and_ensure_llm_models function moved to backend/db/utils.py
 
 # Only initialize models if we are not running a DB migration command
 if 'db' not in sys.argv and 'migrations' not in sys.argv:
-    llm_models = load_and_ensure_llm_models()
-    app.config['LLM_MODELS'] = llm_models if llm_models else ([DEFAULT_MODEL_NAME] if DEFAULT_MODEL_NAME else [])
-    app.logger.info(f"Using models for dropdown: {app.config['LLM_MODELS']}")
+    try:
+        emergency_logger.info("About to call load_and_ensure_llm_models()")
+        llm_models = load_and_ensure_llm_models(app)
+        emergency_logger.info(f"load_and_ensure_llm_models() returned: {llm_models}")
+        
+        app.config['LLM_MODELS'] = llm_models if llm_models else ([DEFAULT_MODEL_NAME] if DEFAULT_MODEL_NAME else [])
+        app.logger.info(f"Using models for dropdown: {app.config['LLM_MODELS']}")
+    except Exception as e:
+        emergency_logger.critical(f"CRITICAL ERROR during model initialization: {str(e)}")
+        emergency_logger.critical(traceback.format_exc())
+        # Set an empty model list as fallback to prevent app crash
+        app.config['LLM_MODELS'] = []
+        app.logger.warning("Using empty model list due to initialization error")
 else:
     app.logger.info("Skipping LLM model loading during DB migration to prevent race conditions.")
     app.config['LLM_MODELS'] = []
@@ -1080,8 +997,9 @@ def get_default_model():
 
 
 @app.route('/chat', methods=['GET', 'POST'])
+@app.route('/chat/<conversation_hash>', methods=['GET', 'POST'])
 @login_required
-def chat():
+def chat(conversation_hash=None):
     if not current_user.can_access_page('chat'):
         flash('You do not have permission to access this page.', 'danger')
         return redirect(url_for('index'))
@@ -1112,7 +1030,15 @@ def chat():
             session.pop('user_llm_service', None)
     
     # Continue with the existing chat route logic
-    conversation_id = request.args.get('conversation_id', None)
+    conversation_id = None
+    
+    # Decode conversation hash if provided as path parameter
+    if conversation_hash:
+        from backend.db.conversation_hash import validate_conversation_access
+        conversation_id = validate_conversation_access(conversation_hash, current_user.id)
+        if not conversation_id:
+            flash('Invalid or expired conversation link.', 'error')
+            return redirect(url_for('chat'))
     # Use the new helper function to get all models this user can access.
     available_models = get_available_models_for_user(current_user)
     app.logger.debug(f"Chat Route: get_available_models_for_user returned {len(available_models)} models.")
@@ -1242,11 +1168,15 @@ def new_conversation():
     )
     db.session.add(conversation)
     db.session.commit()
-    return redirect(url_for('chat', conversation_id=conversation.id))
+    return redirect(url_for('chat', conversation_hash=conversation.get_hash()))
 
-@app.route('/conversation/<int:conversation_id>/rename', methods=['POST'])
+@app.route('/conversation/<conversation_hash>/rename', methods=['POST'])
 @login_required
-def rename_conversation(conversation_id):
+def rename_conversation(conversation_hash):
+    from backend.db.conversation_hash import validate_conversation_access
+    conversation_id = validate_conversation_access(conversation_hash, current_user.id)
+    if not conversation_id:
+        abort(404)
     conversation = db.session.get(Conversation, conversation_id)
     # Check ownership
     if conversation.user_id != current_user.id:
@@ -1257,11 +1187,15 @@ def rename_conversation(conversation_id):
     db.session.commit()
     
     flash("Conversation renamed successfully")
-    return redirect(url_for('chat', conversation_id=conversation_id))
+    return redirect(url_for('chat', conversation_hash=conversation.get_hash()))
 
-@app.route('/conversation/<int:conversation_id>/delete', methods=['POST'])
+@app.route('/conversation/<conversation_hash>/delete', methods=['POST'])
 @login_required
-def delete_conversation(conversation_id):
+def delete_conversation(conversation_hash):
+    from backend.db.conversation_hash import validate_conversation_access
+    conversation_id = validate_conversation_access(conversation_hash, current_user.id)
+    if not conversation_id:
+        abort(404)
     conversation = db.session.get(Conversation, conversation_id)
     # Check ownership
     if conversation.user_id != current_user.id:
@@ -1276,10 +1210,17 @@ def delete_conversation(conversation_id):
 @app.route('/switch_model', methods=['POST'])
 @login_required
 def switch_model():
-    conversation_id = request.form['conversation_id']
+    conversation_hash = request.form['conversation_hash']
     new_model = request.form['model']
+    
+    # Get conversation ID from hash
+    conversation_id = validate_conversation_access(conversation_hash, current_user.id)
+    if not conversation_id:
+        flash("Invalid conversation.", "error")
+        return redirect(url_for('chat'))
+    
     conversation = db.session.get(Conversation, conversation_id)
-    if conversation and conversation.user_id == current_user.id:
+    if conversation:
         conversation.selected_model = new_model
         db.session.commit()
         flash("Model switched successfully.")
@@ -1342,14 +1283,17 @@ def extract_text_from_document(document):
 @login_required
 def upload_document():
     file = request.files['file']
-    conversation_id = request.form['conversation_id']
+    conversation_hash = request.form['conversation_hash']
     if file:
         try:
+            # Get conversation ID from hash
+            conversation_id = validate_conversation_access(conversation_hash, current_user.id)
+            if not conversation_id:
+                flash("Invalid conversation")
+                return redirect(url_for('chat'))
+            
             # Get the conversation
             conversation = db.session.get(Conversation, conversation_id)
-            if not conversation or conversation.user_id != current_user.id:
-                flash("Unauthorized access")
-                return redirect(url_for('chat'))
             
             # Save document to database
             doc = Document(
@@ -1396,18 +1340,21 @@ def upload_voice():
         return jsonify({'success': False, 'error': 'No voice file part'}), 400
         
     file = request.files['voice']
-    conversation_id = request.form.get('conversation_id')
+    conversation_hash = request.form.get('conversation_hash')
     language = request.form.get('language', 'english')  # Default to English if not provided
 
     if file.filename == '':
         return jsonify({'success': False, 'error': 'No selected voice file'}), 400
 
+    if not conversation_hash:
+        return jsonify({'success': False, 'error': 'Missing conversation hash'}), 400
+
+    # Get conversation ID from hash
+    conversation_id = validate_conversation_access(conversation_hash, current_user.id)
     if not conversation_id:
-        return jsonify({'success': False, 'error': 'Missing conversation ID'}), 400
+        return jsonify({'success': False, 'error': 'Invalid or unauthorized conversation'}), 403
 
     conversation = db.session.get(Conversation, conversation_id)
-    if not conversation or conversation.user_id != current_user.id:
-        return jsonify({'success': False, 'error': 'Conversation not found or unauthorized'}), 404
 
     # Use a temporary file for processing
     temp_audio_path = None
@@ -1666,15 +1613,30 @@ def call_model():
     ####################################################
     """)
     app.logger.info(f"Received /call_model request from user {current_user.id}")
-    conversation_id = request.form['conversation_id']
-    prompt = request.form['prompt']
-    app.logger.info(f"Request details - conversation_id: {conversation_id}, prompt: {prompt[:50]}...")
+    
+    # Safely get form data with error handling
+    try:
+        conversation_hash = request.form['conversation_hash']
+        prompt = request.form['prompt']
+    except KeyError as e:
+        app.logger.error(f"Missing required form field: {e}")
+        return jsonify({"error": f"Missing required field: {e}"}), 400
+    
+    app.logger.info(f"Request details - conversation_hash: {conversation_hash}, prompt: {prompt[:50]}...")
+    
+    # Get conversation ID from hash
+    try:
+        from backend.db.conversation_hash import validate_conversation_access
+        conversation_id = validate_conversation_access(conversation_hash, current_user.id)
+        if not conversation_id:
+            app.logger.warning(f"Invalid or unauthorized conversation hash: {conversation_hash}")
+            return jsonify({"error": "Unauthorized"}), 403
+    except Exception as e:
+        app.logger.error(f"Error validating conversation hash: {e}", exc_info=True)
+        return jsonify({"error": "Invalid conversation hash"}), 400
     
     # Get conversation
     conversation = db.session.get(Conversation, conversation_id)
-    if not conversation or conversation.user_id != current_user.id:
-        app.logger.warning(f"Unauthorized access attempt to conversation {conversation_id}")
-        return jsonify({"error": "Unauthorized"}), 403
     
     # Prepare message history
     messages_history = []
@@ -2093,16 +2055,19 @@ active_response_generators = {}
 @login_required
 def stop_response():
     """Stop an active AI response for a conversation"""
-    conversation_id = request.form.get('conversation_id')
-    app.logger.info(f"Request to stop response for conversation {conversation_id}")
+    conversation_hash = request.form.get('conversation_hash')
+    app.logger.info(f"Request to stop response for conversation hash {conversation_hash}")
     
+    if not conversation_hash:
+        return jsonify({"success": False, "error": "No conversation hash provided"}), 400
+    
+    # Get conversation ID from hash
+    conversation_id = validate_conversation_access(conversation_hash, current_user.id)
     if not conversation_id:
-        return jsonify({"success": False, "error": "No conversation ID provided"}), 400
-        
-    # Check permission (user must own the conversation)
-    conversation = db.session.get(Conversation, conversation_id)
-    if not conversation or conversation.user_id != current_user.id:
         return jsonify({"success": False, "error": "Unauthorized"}), 403
+        
+    # Get conversation
+    conversation = db.session.get(Conversation, conversation_id)
     
     # Set the flag to stop the generator for this conversation
     generator_key = f"user_{current_user.id}_conv_{conversation_id}"
@@ -2113,9 +2078,13 @@ def stop_response():
     else:
         return jsonify({"success": False, "error": "No active response found"}), 404
 
-@app.route('/toggle_document_mode/<int:conversation_id>', methods=['POST'])
+@app.route('/toggle_document_mode/<conversation_hash>', methods=['POST'])
 @login_required
-def toggle_document_mode(conversation_id):
+def toggle_document_mode(conversation_hash):
+    from backend.db.conversation_hash import validate_conversation_access
+    conversation_id = validate_conversation_access(conversation_hash, current_user.id)
+    if not conversation_id:
+        return jsonify({"success": False, "error": "Invalid conversation"}), 404
     conversation = db.session.get(Conversation, conversation_id)
     
     # Check ownership
@@ -2160,11 +2129,15 @@ def toggle_document_mode(conversation_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 # Add a new route to update conversation title directly
-@app.route('/conversation/<int:conversation_id>/update_title', methods=['POST'])
+@app.route('/conversation/<conversation_hash>/update_title', methods=['POST'])
 @login_required
-def update_conversation_title(conversation_id):
+def update_conversation_title(conversation_hash):
     """Update a conversation title and save it to the database"""
     try:
+        from backend.db.conversation_hash import validate_conversation_access
+        conversation_id = validate_conversation_access(conversation_hash, current_user.id)
+        if not conversation_id:
+            abort(404)
         conversation = db.session.get(Conversation, conversation_id)
         
         # Check ownership
@@ -2280,13 +2253,18 @@ def synthesize_for_message():
                 return "Message not found", 404
         else:
             # If no specific message, use the active conversation
-            conversation_id = request.form.get('conversation_id')
+            conversation_hash = request.form.get('conversation_hash')
+            if not conversation_hash:
+                return "No conversation hash provided", 400
+            
+            # Get conversation ID from hash
+            conversation_id = validate_conversation_access(conversation_hash, current_user.id)
             if not conversation_id:
-                return "No conversation ID provided", 400
+                return "Invalid or unauthorized conversation", 403
         
         # Check user authorization for this conversation
         conversation = db.session.get(Conversation, conversation_id)
-        if not conversation or conversation.user_id != current_user.id:
+        if not conversation:
             return "Unauthorized", 403
         
         # Read the generated audio file
@@ -3405,50 +3383,49 @@ def update_user_details():
 
 
 
-def init_db():
-    """Initialize the database with Flask-Migrate"""
-    with app.app_context():
-        # This will create the database tables if they don't exist
-        # and apply any pending migrations
-        from flask_migrate import upgrade
-        
-        # db.create_all() is removed because Flask-Migrate now handles schema creation.
-        # The 'flask db upgrade' command in the startup script will create/update tables.
-        
-        # Apply any pending migrations
-        # Initialize RBAC data
-        initialize_rbac_data()
-        load_and_ensure_llm_models()
-        # If you need to run any data migrations, you can add them here
-        # For example:
-        # migrate_data()
+# init_db function moved to backend/db/utils.py
 
+
+# CLI command and database functions moved to backend/db/utils.py
 
 @app.cli.command('init-db')
 def init_db_command():
     """Initializes the database."""
-    init_db()
+    init_db(app)
 
 
-def check_database_connection():
-    """Check if we can connect to the database"""
-    max_retries = 10
-    retry_count = 0
-    
-    while retry_count < max_retries:
+# Print all registered routes for debugging (always runs)
+print("\n=== Registered Flask Routes ===")
+with app.app_context():
+    try:
+        rules = sorted(app.url_map.iter_rules(), key=lambda r: r.rule)
+        for rule in rules:
+            print(f"{rule.endpoint}: {rule} Methods: {','.join(rule.methods)}")
+    except Exception as e:
+        print(f"Error printing routes: {e}")
+print("==============================\n")
+
+# ===========================
+# Unified Database Initialization Logic
+# ===========================
+
+# _run_unified_db_initialization function moved to backend/db/utils.py as run_unified_db_initialization
+
+# ===========================
+# Final Application Startup Logic
+# ===========================
+# Run the unified database initialization during application startup
+# Skip this only when running from the CLI init-db command to avoid duplication
+if 'init-db' not in sys.argv:
+    with app.app_context():
         try:
-            # Try to execute a simple query
-            db.session.execute('SELECT 1')
-            app.logger.info("Successfully connected to the database")
-            return True
+            app.logger.info("STARTUP_SEQUENCE: Initializing database")
+            run_unified_db_initialization(app)
         except Exception as e:
-            retry_count += 1
-            app.logger.warning(f"Database connection failed (attempt {retry_count}/{max_retries}): {str(e)}")
-            if retry_count >= max_retries:
-                app.logger.error("Max retries reached. Could not connect to the database.")
-                return False
-            time.sleep(5)  # Wait before retrying
+            app.logger.error(f"STARTUP_SEQUENCE ERROR: Database initialization failed: {str(e)}")
+            # Continue startup despite errors - the app may still be able to run with partial functionality
 
+# Routes are registered and ready
 
 if __name__ == '__main__':
     # Check dependencies
